@@ -1,0 +1,428 @@
+{
+  "name": "gitea-vscode-web",
+  "displayName": "Gitea Web IDE",
+  "description": "Virtual filesystem, local change overlay and source control for Gitea repositories.",
+  "publisher": "gitea",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "SCM Providers"
+  ],
+  "browser": "./dist/extension.js",
+  "enabledApiProposals": [
+    "fileSearchProvider",
+    "textSearchProvider",
+    "scmActionButton",
+    "scmValidation"
+  ],
+  "activationEvents": [
+    "onFileSystem:gitea-vfs",
+    "onFileSystem:gitea-base",
+    "onStartupFinished",
+    "onAuthenticationRequest:gitea"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": true
+  },
+  "contributes": {
+    "terminal": {
+      "profiles": [
+        {
+          "id": "gitea.shell",
+          "title": "Gitea Shell",
+          "icon": "terminal"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Gitea Web IDE",
+      "properties": {
+        "giteaWebIde.autoFetch.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Check the remote branch for new commits while this window is focused. Updating always asks first."
+        },
+        "giteaWebIde.autoFetch.interval": {
+          "type": "number",
+          "default": 60,
+          "minimum": 15,
+          "description": "Seconds between remote checks (at least 15)."
+        },
+        "gitea.archive.prefetch": {
+          "type": "string",
+          "enum": ["onSearch", "onOpen", "off"],
+          "default": "onSearch",
+          "markdownDescription": "When to download the repository archive (one `.tar.gz` per commit) so search and file reads need no per-file requests. A complete stored archive is used unless this is `off`."
+        },
+        "gitea.archive.maxRepositoryMiB": {
+          "type": "number",
+          "default": 128,
+          "minimum": 1,
+          "markdownDescription": "Largest total file size, from the recursive tree, for which the archive is fetched."
+        },
+        "gitea.archive.maxFiles": {
+          "type": "number",
+          "default": 50000,
+          "minimum": 1,
+          "markdownDescription": "Largest file count for which the archive is fetched."
+        },
+        "gitea.archive.maxFileMiB": {
+          "type": "number",
+          "default": 25,
+          "minimum": 1,
+          "markdownDescription": "Files above this size are left out of the archive cache and read individually."
+        },
+        "gitea.archive.maxDownloadMiB": {
+          "type": "number",
+          "default": 128,
+          "minimum": 1,
+          "markdownDescription": "Largest compressed download."
+        },
+        "gitea.archive.idleTimeoutSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "markdownDescription": "Abort the download when no data arrives for this long."
+        },
+        "gitea.archive.startTimeoutSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 1,
+          "markdownDescription": "How long to wait for the server to build the archive and start sending."
+        },
+        "gitea.archive.cacheMiB": {
+          "type": "number",
+          "default": 512,
+          "minimum": 1,
+          "markdownDescription": "Total size of stored archives; the least recently used are removed first."
+        }
+      }
+    },
+    "authentication": [
+      {
+        "id": "gitea",
+        "label": "Gitea"
+      }
+    ],
+    "commands": [
+      {
+        "command": "gitea.commit",
+        "title": "Commit",
+        "category": "Gitea",
+        "icon": "$(check)"
+      },
+      {
+        "command": "gitea.refresh",
+        "title": "Refresh",
+        "category": "Gitea",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "gitea.discardChange",
+        "title": "Discard Changes",
+        "category": "Gitea",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "gitea.discardAll",
+        "title": "Discard All Changes",
+        "category": "Gitea",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "gitea.signIn",
+        "title": "Sign In with Personal Access Token",
+        "category": "Gitea"
+      },
+      {
+        "command": "gitea.signInOAuth",
+        "title": "Sign In with OAuth",
+        "category": "Gitea"
+      },
+      {
+        "command": "gitea.signOut",
+        "title": "Sign Out",
+        "category": "Gitea"
+      },
+      {
+        "command": "gitea.status",
+        "title": "Show Status",
+        "category": "Gitea"
+      },
+      {
+        "command": "gitea.openShell",
+        "title": "Open Shell",
+        "category": "Gitea",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "gitea.stage",
+        "title": "Stage Changes",
+        "category": "Gitea",
+        "icon": "$(add)"
+      },
+      {
+        "command": "gitea.unstage",
+        "title": "Unstage Changes",
+        "category": "Gitea",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "gitea.stageAll",
+        "title": "Stage All Changes",
+        "category": "Gitea",
+        "icon": "$(add)"
+      },
+      {
+        "command": "gitea.unstageAll",
+        "title": "Unstage All Changes",
+        "category": "Gitea",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "gitea.switchRef",
+        "title": "Checkout to...",
+        "category": "Gitea",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "gitea.createBranch",
+        "title": "Create Branch...",
+        "category": "Gitea",
+        "icon": "$(add)"
+      },
+      {
+        "command": "gitea.commitToNewBranch",
+        "title": "Commit to New Branch...",
+        "category": "Gitea",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "gitea.createPullRequest",
+        "title": "Create Pull Request...",
+        "category": "Gitea",
+        "icon": "$(git-pull-request-create)"
+      },
+      {
+        "command": "gitea.checkRemote",
+        "title": "Fetch",
+        "category": "Gitea",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "gitea.openFile",
+        "title": "Open File",
+        "category": "Gitea",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "gitea.openChanges",
+        "title": "Open Changes",
+        "category": "Gitea"
+      },
+      {
+        "command": "gitea.showOutput",
+        "title": "Show Gitea Output",
+        "category": "Gitea"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "gitea.scm.commit",
+        "label": "Commit"
+      },
+      {
+        "id": "gitea.scm.changes",
+        "label": "Changes"
+      },
+      {
+        "id": "gitea.scm.branch",
+        "label": "Branch"
+      }
+    ],
+    "menus": {
+      "scm/title": [
+        {
+          "command": "gitea.commit",
+          "group": "navigation@1",
+          "when": "scmProvider == gitea"
+        },
+        {
+          "command": "gitea.refresh",
+          "group": "navigation@2",
+          "when": "scmProvider == gitea"
+        },
+        {
+          "command": "gitea.createPullRequest",
+          "group": "navigation@3",
+          "when": "scmProvider == gitea"
+        },
+        {
+          "command": "gitea.switchRef",
+          "group": "1_sync@1",
+          "when": "scmProvider == gitea"
+        },
+        {
+          "command": "gitea.checkRemote",
+          "group": "1_sync@2",
+          "when": "scmProvider == gitea"
+        },
+        {
+          "submenu": "gitea.scm.commit",
+          "group": "2_main@1",
+          "when": "scmProvider == gitea"
+        },
+        {
+          "submenu": "gitea.scm.changes",
+          "group": "2_main@2",
+          "when": "scmProvider == gitea"
+        },
+        {
+          "submenu": "gitea.scm.branch",
+          "group": "2_main@3",
+          "when": "scmProvider == gitea"
+        },
+        {
+          "command": "gitea.showOutput",
+          "group": "3_output",
+          "when": "scmProvider == gitea"
+        }
+      ],
+      "gitea.scm.commit": [
+        {
+          "command": "gitea.commit",
+          "group": "1_commit@1"
+        },
+        {
+          "command": "gitea.commitToNewBranch",
+          "group": "1_commit@2"
+        }
+      ],
+      "gitea.scm.changes": [
+        {
+          "command": "gitea.stageAll",
+          "group": "1_changes@1"
+        },
+        {
+          "command": "gitea.unstageAll",
+          "group": "1_changes@2"
+        },
+        {
+          "command": "gitea.discardAll",
+          "group": "2_discard"
+        }
+      ],
+      "gitea.scm.branch": [
+        {
+          "command": "gitea.createBranch",
+          "group": "1_branch"
+        }
+      ],
+      "scm/resourceState/context": [
+        {
+          "command": "gitea.openFile",
+          "group": "inline@0",
+          "when": "scmProvider == gitea && scmResourceState != deleted"
+        },
+        {
+          "command": "gitea.openChanges",
+          "group": "0_view@1",
+          "when": "scmProvider == gitea && scmResourceState != added"
+        },
+        {
+          "command": "gitea.openFile",
+          "group": "0_view@2",
+          "when": "scmProvider == gitea && scmResourceState != deleted"
+        },
+        {
+          "command": "gitea.discardChange",
+          "group": "inline@50",
+          "when": "scmProvider == gitea"
+        },
+        {
+          "command": "gitea.discardChange",
+          "group": "1_modification",
+          "when": "scmProvider == gitea"
+        },
+        {
+          "command": "gitea.stage",
+          "group": "inline@99",
+          "when": "scmProvider == gitea && scmResourceGroup == changes"
+        },
+        {
+          "command": "gitea.stage",
+          "group": "1_modification@0",
+          "when": "scmProvider == gitea && scmResourceGroup == changes"
+        },
+        {
+          "command": "gitea.unstage",
+          "group": "inline@99",
+          "when": "scmProvider == gitea && scmResourceGroup == staged"
+        },
+        {
+          "command": "gitea.unstage",
+          "group": "1_modification@1",
+          "when": "scmProvider == gitea && scmResourceGroup == staged"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "gitea.discardChange",
+          "when": "false"
+        },
+        {
+          "command": "gitea.stage",
+          "when": "false"
+        },
+        {
+          "command": "gitea.unstage",
+          "when": "false"
+        }
+      ],
+      "scm/resourceGroup/context": [
+        {
+          "command": "gitea.discardAll",
+          "group": "inline@50",
+          "when": "scmProvider == gitea && scmResourceGroup == changes"
+        },
+        {
+          "command": "gitea.stageAll",
+          "group": "inline@99",
+          "when": "scmProvider == gitea && scmResourceGroup == changes"
+        },
+        {
+          "command": "gitea.stageAll",
+          "group": "1_modification@0",
+          "when": "scmProvider == gitea && scmResourceGroup == changes"
+        },
+        {
+          "command": "gitea.unstageAll",
+          "group": "inline@99",
+          "when": "scmProvider == gitea && scmResourceGroup == staged"
+        },
+        {
+          "command": "gitea.unstageAll",
+          "group": "1_modification@1",
+          "when": "scmProvider == gitea && scmResourceGroup == staged"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "terminal",
+        "contents": "A browser has no process terminal. The Gitea shell runs commands over this repository.\n[Open Gitea Shell](command:gitea.openShell)"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --platform=browser --format=cjs --target=es2022 --external:vscode --alias:node:zlib=./src/shell/zlib-stub.ts --outfile=dist/extension.js"
+  }
+}
