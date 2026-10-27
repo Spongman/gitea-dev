@@ -1,0 +1,7 @@
+node_modules/
+dist/
+data/
+build.log
+test-results/
+playwright-report/
+*.tsbuildinfo
