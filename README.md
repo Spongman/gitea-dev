@@ -375,6 +375,22 @@ npx playwright install chromium firefox webkit
 npm run test:browser 2>&1 | tee -a ./build.log
 ```
 
+**Releases.** `.github/workflows/ci.yml` runs typecheck, the unit tests, the build and the packaging on every push to
+`main` and every pull request, and uploads the archive as a workflow artifact. A release is a tag named
+`v<version>`, where `<version>` is `version` in `package.json`:
+
+```sh
+npm version --no-git-tag-version 0.3.0     # edit package.json and package-lock.json
+git commit -am "Release 0.3.0"
+git tag v0.3.0
+git push origin main v0.3.0
+```
+
+`.github/workflows/release.yml` runs on the tag. It fails when the tag and `package.json` disagree, runs typecheck,
+the unit tests, the build and the packaging, then creates a GitHub release with `gitea-dev-v<version>.tar.gz`, its
+`.sha256` file and generated notes. A tag with a hyphen (`v0.3.0-rc.1`) is published as a pre-release. The
+integration and browser suites are not run in Actions.
+
 Suites, prerequisites, the disposable Gitea fixtures and what is not covered: [docs/testing.md](docs/testing.md).
 
 **Workbench assets.** `config/workbench.json` pins the official standalone web archive
