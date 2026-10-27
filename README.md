@@ -382,14 +382,16 @@ npm run test:browser 2>&1 | tee -a ./build.log
 ```sh
 npm version --no-git-tag-version 0.3.0     # edit package.json and package-lock.json
 git commit -am "Release 0.3.0"
+git push origin main
 git tag v0.3.0
-git push origin main v0.3.0
+git push origin v0.3.0
 ```
 
-`.github/workflows/release.yml` runs on the tag. It fails when the tag and `package.json` disagree, runs typecheck,
-the unit tests, the build and the packaging, then creates a GitHub release with `gitea-dev-v<version>.tar.gz`, its
-`.sha256` file and generated notes. A tag with a hyphen (`v0.3.0-rc.1`) is published as a pre-release. The
-integration and browser suites are not run in Actions.
+The same workflow runs on the tag. It fails when the tag and `package.json` disagree, then builds and packs as above
+and a second job creates a GitHub release with `gitea-dev-v<version>.tar.gz`, its `.sha256` file and generated
+notes. Running the CI workflow by hand from the Actions tab with an existing tag as input publishes that tag's
+release the same way. A tag with a hyphen (`v0.3.0-rc.1`) is published as a pre-release. The integration and browser
+suites are not run in Actions.
 
 Suites, prerequisites, the disposable Gitea fixtures and what is not covered: [docs/testing.md](docs/testing.md).
 
