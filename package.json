@@ -21,7 +21,7 @@
     "instance:status": "node scripts/local-instance.mjs status"
   },
   "dependencies": {
-    "just-bash": "^3.4.2",
+    "just-bash": "3.6.0",
     "tar": "7.5.22"
   },
   "devDependencies": {
