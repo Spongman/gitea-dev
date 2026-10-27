@@ -1,0 +1,27 @@
+{{/* Gitea v1.24.6 repo/header.tmpl renders this inside .overflow-menu-items for every repo page, with no permission guard. */}}
+{{if and (.Permission.CanRead ctx.Consts.RepoUnitTypeCode) (not .IsEmptyRepo)}}
+	{{/* Pages without a repo ref (issues, pulls, wiki, ...) fall back to the default branch. */}}
+	{{$owner := .Repository.OwnerName}}
+	{{$repo := .Repository.Name}}
+	{{$ref := .Repository.DefaultBranch}}
+	{{$refKind := "branch"}}
+	{{with .RefFullName}}{{if .RefType}}{{$ref = .ShortName}}{{$refKind = .RefType}}{{end}}{{end}}
+	{{/* Pull request pages open the head: its branch (a fork's repo for fork PRs), else the head commit, which the base repo keeps at refs/pull/N/head. */}}
+	{{with .Issue}}{{if and .IsPull .PullRequest}}
+		{{if $.HeadBranchLink}}
+			{{with .PullRequest.HeadRepo}}{{$owner = .OwnerName}}{{$repo = .Name}}{{end}}
+			{{$ref = .PullRequest.HeadBranch}}
+			{{$refKind = "branch"}}
+		{{else if $.PullHeadCommitID}}
+			{{$ref = $.PullHeadCommitID}}
+			{{$refKind = "commit"}}
+		{{end}}
+	{{end}}{{end}}
+	{{/* A commit page opens that commit. */}}
+	{{if and .PageIsDiff .Commit (not .Issue)}}{{$ref = .Commit.ID.String}}{{$refKind = "commit"}}{{end}}
+	{{/* A file page also opens that file in the editor. */}}
+	<a class="item" href="{{AppSubUrl}}/assets/gitea-dev/index.html?owner={{$owner}}&amp;repository={{$repo}}&amp;ref={{$ref}}&amp;refKind={{$refKind}}{{if and .IsViewFile .TreePath}}&amp;path={{.TreePath}}{{end}}" target="_blank" rel="noopener" data-gitea-dev-launch>
+		{{svg "octicon-code"}} Web IDE
+	</a>
+	<script src="{{AppSubUrl}}/assets/gitea-dev/shortcut.js"></script>
+{{end}}
