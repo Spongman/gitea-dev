@@ -535,9 +535,15 @@ test('--webviews follows the workbench mode unless given', async () => {
   }
 });
 
+const FAKE_CLIENT = '6f3c2a1e-0b0d-4c55-9a37-5d1c9e8f7a10';
 // A stand-in for Gitea 1.24.6 over HTTPS, answering as the real one does (version JSON, appUrl in pages,
 // CORS from [cors], and the OAuth token endpoint's errors for an invalid code).
-async function fakeGitea(behavior: { gitea?: boolean; gateway?: boolean; appUrl?: string; cors?: boolean; clients?: Record<string, 'public' | 'confidential' | 'elsewhere'> }) {
+interface AppRequest { method: string; authorization?: string; body: string }
+async function fakeGitea(behavior: {
+  gitea?: boolean; gateway?: boolean; appUrl?: string; cors?: boolean; clients?: Record<string, 'public' | 'confidential' | 'elsewhere'>;
+  /** The token the user API accepts, the applications it lists, and the requests it received. */
+  token?: string; apps?: Record<string, unknown>[]; requests?: AppRequest[];
+}) {
   const dir = await mkdtemp(join(tmpdir(), 'gitea-dev-tls-'));
   const made = spawnSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-days', '1',
     '-subj', '/CN=127.0.0.1', '-addext', 'subjectAltName=IP:127.0.0.1', '-keyout', join(dir, 'key.pem'), '-out', join(dir, 'cert.pem')]);
@@ -555,7 +561,18 @@ async function fakeGitea(behavior: { gitea?: boolean; gateway?: boolean; appUrl?
       res.setHeader('Access-Control-Allow-Headers', 'Authorization');
       res.end();
     } else if (path === '/api/v1/version') res.end('{"version":"1.24.6"}');
-    else if (path === '/login/oauth/access_token') {
+    else if (path === '/api/v1/user/applications/oauth2') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        behavior.requests?.push({ method: req.method ?? '', authorization: req.headers.authorization, body });
+        res.setHeader('Content-Type', 'application/json');
+        if (req.headers.authorization !== `token ${behavior.token}`) { res.statusCode = 401; res.end('{"message":"token is required"}'); return; }
+        if (req.method === 'GET') { res.end(JSON.stringify(behavior.apps ?? [])); return; }
+        res.statusCode = 201;
+        res.end(JSON.stringify({ id: 1, client_id: FAKE_CLIENT, client_secret: 'secret', ...JSON.parse(body) }));
+      });
+    } else if (path === '/login/oauth/access_token') {
       let body = '';
       req.on('data', chunk => { body += chunk; });
       req.on('end', () => {
@@ -576,6 +593,76 @@ async function fakeGitea(behavior: { gitea?: boolean; gateway?: boolean; appUrl?
   const env = { CURL_CA_BUNDLE: join(dir, 'cert.pem'), NODE_EXTRA_CA_CERTS: join(dir, 'cert.pem') };
   return { base, env, close: async () => { server.close(); await rm(dir, { recursive: true, force: true }); } };
 }
+
+test('--create-oauth-app finds or creates the public OAuth application with GITEA_TOKEN and installs its Client ID', { skip: spawnSync('openssl', ['version']).status !== 0 && 'needs openssl' }, async () => {
+  const TOKEN = 'abcdef0123456789abcdef0123456789abcdef01';
+  const clientIdOf = (files: Record<string, string>) => JSON.parse(files['public/assets/gitea-dev/configuration.json']!).oauthClientId;
+  const app = (base: string, extra: Record<string, unknown> = {}) => ({ id: 7, name: 'Gitea Web IDE', client_id: 'existing-client-id', confidential_client: false,
+    skip_secondary_authorization: true, redirect_uris: [`${base}/assets/gitea-dev/oauth-callback.html`], ...extra });
+  const run = async (behavior: Parameters<typeof fakeGitea>[0], args: string[], env: Record<string, string> = { GITEA_TOKEN: TOKEN }, apps?: (base: string) => Record<string, unknown>[]) => {
+    const requests: AppRequest[] = [];
+    const options: Parameters<typeof fakeGitea>[0] = { token: TOKEN, ...behavior, requests };
+    const gitea = await fakeGitea(options);
+    try {
+      if (apps) options.apps = apps(gitea.base);
+      return { requests, base: gitea.base, results: await installAll([gitea.base, ...LOCAL, ...args], undefined, { env: { ...gitea.env, ...env } }) };
+    } finally { await gitea.close(); }
+  };
+
+  // Not there yet: created once per shell, as a public client with the callback, the token sent as a header.
+  const created = await run({}, ['--create-oauth-app']);
+  for (const result of created.results) {
+    assert.equal(result.status, 0, `${result.kind}: ${result.stderr}`);
+    assert.equal(clientIdOf(result.files), FAKE_CLIENT, result.kind);
+    assert.ok(result.stderr.includes(`Created OAuth application "Gitea Web IDE" with Client ID ${FAKE_CLIENT}`), result.stderr);
+    assert.ok(!result.stderr.includes(TOKEN), `${result.kind} printed the token`);
+  }
+  const posts = created.requests.filter(request => request.method === 'POST');
+  assert.equal(posts.length, created.results.length);
+  assert.deepEqual(JSON.parse(posts[0]!.body), { name: 'Gitea Web IDE', confidential_client: false, skip_secondary_authorization: true,
+    redirect_uris: [`${created.base}/assets/gitea-dev/oauth-callback.html`] });
+  assert.ok(created.requests.every(request => request.authorization === `token ${TOKEN}`));
+
+  // Already there with the right settings: reused, nothing created.
+  const found = await run({}, ['--create-oauth-app'], undefined, base => [{ id: 1, name: 'Other', client_id: 'other-client-id' }, app(base)]);
+  for (const result of found.results) {
+    assert.equal(result.status, 0, `${result.kind}: ${result.stderr}`);
+    assert.equal(clientIdOf(result.files), 'existing-client-id', result.kind);
+    assert.ok(result.stderr.includes('Found OAuth application "Gitea Web IDE" with Client ID existing-client-id'), result.stderr);
+  }
+  assert.equal(found.requests.filter(request => request.method === 'POST').length, 0);
+
+  // Refused, with nothing installed.
+  const refusals: [string, Parameters<typeof fakeGitea>[0], string[], Record<string, string> | undefined, ((base: string) => Record<string, unknown>[]) | undefined, string | RegExp][] = [
+    ['confidential', {}, ['--create-oauth-app'], undefined, base => [app(base, { confidential_client: true })], 'the OAuth application "Gitea Web IDE" is confidential'],
+    ['asks each time', {}, ['--create-oauth-app'], undefined, base => [app(base, { skip_secondary_authorization: false })], 'does not skip authorization for public clients'],
+    ['other redirect', {}, ['--create-oauth-app'], undefined, () => [app('https://elsewhere.example')], /lacks the redirect URI https:\/\/127\.0\.0\.1:\d+\/assets\/gitea-dev\/oauth-callback\.html/],
+    ['wrong token', {}, ['--create-oauth-app'], { GITEA_TOKEN: 'ffffffffffffffffffffffffffffffffffffffff' }, undefined, /^--create-oauth-app: Gitea refused GITEA_TOKEN \(HTTP 401\)/m],
+    ['no token', {}, ['--create-oauth-app'], { GITEA_TOKEN: '' }, undefined, /^--create-oauth-app: needs the environment variable GITEA_TOKEN/m],
+    ['odd token', {}, ['--create-oauth-app'], { GITEA_TOKEN: 'a b' }, undefined, /^--create-oauth-app: GITEA_TOKEN holds characters a Gitea token never has\.$/m],
+    ['with a client id', {}, ['--create-oauth-app', '--oauth-client-id=abc'], undefined, undefined, /^--create-oauth-app: cannot be combined with --oauth-client-id/m],
+  ];
+  for (const [name, extra, args, env, apps, expected] of refusals) {
+    const refused = await run({ ...extra }, args, env, apps);
+    sameOutput(refused.results);
+    for (const result of refused.results) {
+      assert.notEqual(result.status, 0, `${result.kind} ${name}`);
+      assert.equal(result.files['public/assets/gitea-dev/configuration.json'], undefined, `${result.kind} ${name} wrote files`);
+      if (typeof expected === 'string') assert.ok(result.stderr.includes(expected), `${result.kind} ${name}: ${result.stderr}`);
+      else assert.match(result.stderr, expected, `${result.kind} ${name}`);
+    }
+    assert.ok(!refused.results[0]!.stderr.includes('ffffffffffffffffffffffffffffffffffffffff'), `${name} printed the token`);
+  }
+
+  // Nothing answers at ROOT_URL: refused rather than installed without an application.
+  const silent = await installAll(['https://127.0.0.1:9', ...LOCAL, '--create-oauth-app'], undefined, { env: { GITEA_TOKEN: TOKEN } });
+  sameOutput(silent);
+  for (const result of silent) {
+    assert.notEqual(result.status, 0, result.kind);
+    assert.match(result.stderr, /^--create-oauth-app: Gitea is not reachable at https:\/\/127\.0\.0\.1:9;/m);
+    assert.equal(result.files['public/assets/gitea-dev/configuration.json'], undefined, `${result.kind} wrote files`);
+  }
+});
 
 test('a running Gitea at ROOT_URL is checked: it is Gitea, its ROOT_URL, [cors] for cdn, and the OAuth application', { skip: spawnSync('openssl', ['version']).status !== 0 && 'needs openssl' }, async () => {
   const client = 'd22e588f-d1bd-42af-84ef-7f888fa2d355';

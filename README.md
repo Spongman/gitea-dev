@@ -131,9 +131,20 @@ The OAuth application lets the editor sign a user in through Gitea: a Gitea sign
 allow access, and later loads sign in silently while the user is signed in to Gitea. The editor is a **public
 client**: it runs in the browser, cannot keep a secret, and proves itself with PKCE instead.
 
-In the Gitea web UI, as an administrator, open **Site Administration > Integrations > Applications**
-(`<ROOT_URL>/-/admin/applications`). An application there belongs to the instance rather than to one user,
-which suits a site-wide editor. Without administrator rights, any user can create the same application under
+There are three ways to register it. **Use the administrator UI (A)** unless you cannot: it is the only way to
+make an application that belongs to the whole instance. Gitea's API creates applications only for a user, so B and
+C produce an application owned by one account, which stops working if that account is deleted.
+
+| | Way | Owner | Result |
+| --- | --- | --- | --- |
+| A | Administrator UI (recommended) | the instance | A Client ID to pass with `--oauth-client-id`. |
+| B | `install.sh --create-oauth-app` | the token's user | The installer creates or reuses the application and installs its Client ID. |
+| C | Gitea API with `curl` | the account you authenticate as | A Client ID to pass with `--oauth-client-id`. |
+
+#### A. Administrator UI (recommended)
+
+As an administrator, open **Site Administration > Integrations > Applications**
+(`<ROOT_URL>/-/admin/applications`). Without administrator rights, any user can create the same application under
 **Settings > Applications** (`<ROOT_URL>/user/settings/applications`); it then belongs to that user's account.
 Under **Create a new OAuth2 Application**, fill in:
 
@@ -147,7 +158,24 @@ Under **Create a new OAuth2 Application**, fill in:
 Click **Create Application** and copy the **Client ID**; it is the value of `--oauth-client-id`. The client
 secret Gitea shows is not used.
 
-The same application through Gitea's API, with the credentials of the account that should own it:
+#### B. Let the installer create it
+
+Give the installer a personal access token in the environment variable `GITEA_TOKEN`, with the `user` permission as
+Read and Write, and add `--create-oauth-app` (not together with `--oauth-client-id`):
+
+```sh
+GITEA_TOKEN=TOKEN sh gitea-dev/install.sh /var/lib/gitea/custom --create-oauth-app
+```
+
+Gitea must be running at `ROOT_URL`. The token goes to `curl` on its standard input, not its arguments, and is
+never printed. The installer looks in the token owner's applications for one named `Gitea Web IDE`. It reuses that
+one if it is public, skips authorization after one consent and has the redirect URI above; if it differs, the
+installer stops and says what to fix, and changes nothing. If there is none it creates one. A rerun therefore
+reuses the application. The installer prints the Client ID it used.
+
+#### C. Gitea API
+
+With the credentials of the account that should own the application:
 
 ```sh
 curl -u USER -H 'Content-Type: application/json' \
@@ -263,7 +291,8 @@ want; do not edit the installed files.
 | `ROOT_URL` (second) | `[server] ROOT_URL` of the `app.ini` | Gitea's public address, equal to `[server] ROOT_URL` in `app.ini`: `https://host[:port][/sub/path]`, or `http` on `localhost`, `127.0.0.1` or `[::1]`; lowercase host, plain path. Must be `https` with `--workbench=cdn`. | Leave it out when the `app.ini` is found (see `--app-ini`); the installer reads it and says which value it used. Pass it when `app.ini` has no literal `ROOT_URL`. |
 | `--workbench=cdn\|download\|local` | `cdn` | Where browsers get the workbench ([step 2](#2-choose-a-workbench-source)). | `download` or `local` to keep browsers from contacting Microsoft. |
 | `--workbench-archive=PATH` | none | The workbench archive file; it must match the SHA-256 pinned in `workbench.json`. Required by `--workbench=local`, refused otherwise. | Air-gapped installs. |
-| `--oauth-client-id=ID` | none | Enables **Sign In with OAuth** with this OAuth application ([step 3](#3-register-the-oauth-application-optional)): 1-128 letters, digits or hyphens. | When you registered the OAuth application. Without it users sign in with a personal access token. |
+| `--oauth-client-id=ID` | none | Enables **Sign In with OAuth** with this OAuth application ([step 3](#3-register-the-oauth-application-optional)): 1-128 letters, digits or hyphens. | When you registered the application in the administrator UI (recommended). Without an OAuth application users sign in with a personal access token. |
+| `--create-oauth-app` | off | Finds or creates the public OAuth application `Gitea Web IDE` with the personal access token in the environment variable `GITEA_TOKEN`, and installs its Client ID. The application belongs to the token's user, not the instance. Refused with `--oauth-client-id`. | Only when the administrator UI is not an option ([step 3, B](#b-let-the-installer-create-it)). |
 | `--gallery=URL\|off` | `https://open-vsx.org` | The extension gallery the Extensions view uses, which browsers contact directly. `off` disables installing extensions. | `off` on air-gapped sites or to forbid extensions; a URL for a private Open VSX instance. |
 | `--extensions-allowlist="publisher.name ..."` | all | Only these gallery extensions are listed and downloadable. Ids are lowercased, separated by spaces, tabs, newlines or commas; an empty list is refused. | To limit extensions. Enforced by the browser, so not a security boundary ([Security model](#security-model)). |
 | `--connect-src="SOURCE ..."` | none | Extra hosts extensions may connect to: `https://host[:port][/path]`, `wss://`, or loopback `http://`/`ws://`; a leading `*.` needs two more labels. Refused with `cdn`, where Microsoft's extension host page allows any `https:` host. | `download` or `local`, when an extension needs a service. |

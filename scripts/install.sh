@@ -5,9 +5,10 @@
 set -eu
 export LC_ALL=C
 
-usage='Usage: install GITEA_CUSTOM [ROOT_URL] [--oauth-client-id=ID] [--webviews=disabled|vscode-cdn]
+usage='Usage: install GITEA_CUSTOM [ROOT_URL] [--oauth-client-id=ID | --create-oauth-app] [--webviews=disabled|vscode-cdn]
   [--connect-src="SOURCE ..."] [--extensions-allowlist="PUBLISHER.NAME ..."] [--gallery=URL|off]
-  [--workbench=cdn|download|local] [--workbench-archive=PATH] [--app-ini=PATH]'
+  [--workbench=cdn|download|local] [--workbench-archive=PATH] [--app-ini=PATH]
+  --create-oauth-app reads a personal access token from the environment variable GITEA_TOKEN.'
 cors_lines='[cors]
 ENABLED = true
 ALLOW_DOMAIN = https://*.vscode-cdn.net
@@ -171,6 +172,51 @@ check_app_ini() {
     cors_problem "$1 [cors] HEADERS: got $(show "$headers"); expected it to include Content-Type."
   fi
 }
+oauth_name='Gitea Web IDE'
+# Gitea API call as the owner of GITEA_TOKEN: METHOD PATH [JSON]. Prints the body, then the HTTP status on a last line.
+# The token goes to curl on stdin, never in its arguments, which other users can read.
+gitea_api() {
+  if [ $# -ge 3 ]; then
+    printf 'header = "Authorization: token %s"\n' "$GITEA_TOKEN" | curl -s -m 30 -K - -X "$1" -H 'Content-Type: application/json' \
+      -H 'Accept: application/json' --data "$3" -w '\n%{http_code}' "$instance/api/v1$2"
+  else
+    printf 'header = "Authorization: token %s"\n' "$GITEA_TOKEN" | curl -s -m 30 -K - -X "$1" \
+      -H 'Accept: application/json' -w '\n%{http_code}' "$instance/api/v1$2"
+  fi
+}
+# Finds the OAuth application named $oauth_name of the token's owner, or creates it, and sets oauth_client_id.
+# Gitea lists and creates applications only per user, so the application belongs to that account.
+create_oauth_app() {
+  callback=$instance/assets/gitea-dev/oauth-callback.html
+  if ! response=$(gitea_api GET /user/applications/oauth2); then
+    die "--create-oauth-app: Gitea is not reachable at $instance; start it first, or register the application by hand and pass --oauth-client-id."
+  fi
+  status=$(printf '%s\n' "$response" | tail -n 1)
+  body=$(printf '%s\n' "$response" | sed '$d')
+  case $status in
+    200) ;;
+    401 | 403) die "--create-oauth-app: Gitea refused GITEA_TOKEN (HTTP $status); it needs the user permission as Read and Write." ;;
+    *) die "--create-oauth-app: $instance/api/v1/user/applications/oauth2 answered HTTP $status; expected 200." ;;
+  esac
+  # The listing has no nested objects, so a "}" ends each application.
+  existing=$(printf '%s' "$body" | tr '}' '\n' | grep "\"name\":\"$oauth_name\"" | head -n 1) || existing=''
+  if [ -n "$existing" ]; then
+    case $existing in *'"confidential_client":false'*) ;; *) die "--create-oauth-app: the OAuth application \"$oauth_name\" is confidential; delete it or register a public one (confidential_client false)." ;; esac
+    case $existing in *'"skip_secondary_authorization":true'*) ;; *) die "--create-oauth-app: the OAuth application \"$oauth_name\" does not skip authorization for public clients; check that option in Settings > Applications, or delete it." ;; esac
+    case $existing in *"\"$callback\""*) ;; *) die "--create-oauth-app: the OAuth application \"$oauth_name\" lacks the redirect URI $callback; add it in Settings > Applications, or delete it." ;; esac
+    app_action=Found
+  else
+    data="{\"name\":\"$oauth_name\",\"confidential_client\":false,\"skip_secondary_authorization\":true,\"redirect_uris\":[\"$callback\"]}"
+    if ! response=$(gitea_api POST /user/applications/oauth2 "$data"); then die "--create-oauth-app: Gitea stopped answering at $instance."; fi
+    status=$(printf '%s\n' "$response" | tail -n 1)
+    [ "$status" = 201 ] || die "--create-oauth-app: creating the OAuth application answered HTTP $status; expected 201."
+    existing=$(printf '%s\n' "$response" | sed '$d')
+    app_action=Created
+  fi
+  oauth_client_id=$(printf '%s' "$existing" | sed -n 's/.*"client_id":"\([^"]*\)".*/\1/p' | head -n 1)
+  matches "$oauth_client_id" "$CLIENT_ID_RE" || die "--create-oauth-app: Gitea's answer holds no usable client_id."
+  printf '%s\n' "$app_action OAuth application \"$oauth_name\" with Client ID $oauth_client_id (owned by the owner of GITEA_TOKEN)." >&2
+}
 # Online checks against the running Gitea at ROOT_URL; skipped with a note when it does not answer.
 check_gitea() {
   skipped="the online checks of ROOT_URL"
@@ -230,12 +276,13 @@ check_gitea() {
 
 custom='' root_url='' positional=0 extra=''
 oauth_client_id='' has_client_id=0 webviews='' has_webviews=0 connect_src='' allowlist='' has_allowlist=0 gallery=$OPEN_VSX
-workbench=cdn workbench_archive='' app_ini='' has_app_ini=0 test_mode=0
+workbench=cdn workbench_archive='' app_ini='' has_app_ini=0 test_mode=0 create_app=0
 while [ $# -gt 0 ]; do
   arg=$1; shift
   case $arg in
     # For the test harness: writes the test hook flag and allows an http loopback ROOT_URL with cdn. Not in the usage text.
     --test-mode) test_mode=1; continue ;;
+    --create-oauth-app) create_app=1; continue ;;
     --*=*) name=${arg%%=*}; value=${arg#*=} ;;
     --*)
       name=$arg
@@ -318,6 +365,15 @@ elif [ "$positional" -eq 1 ]; then
   elif [ "$has_app_ini" = 0 ] && [ -d "$custom" ]; then
     problem "ROOT_URL: not given, and $custom has no conf/app.ini to read it from; pass ROOT_URL or --app-ini=PATH."
   fi
+fi
+if [ "$create_app" = 1 ]; then
+  [ "$has_client_id" = 0 ] || problem '--create-oauth-app: cannot be combined with --oauth-client-id; the Client ID comes from the application it finds or creates.'
+  if [ -z "${GITEA_TOKEN:-}" ]; then
+    problem '--create-oauth-app: needs the environment variable GITEA_TOKEN, a personal access token of the account that will own the application, with the user permission as Read and Write.'
+  elif ! matches "$GITEA_TOKEN" '^[A-Za-z0-9._~+/=-]+$'; then
+    problem '--create-oauth-app: GITEA_TOKEN holds characters a Gitea token never has.'
+  fi
+  command -v curl >/dev/null 2>&1 || problem '--create-oauth-app: needs curl.'
 fi
 client_json=null checked_client_id=''
 if [ "$has_client_id" = 1 ]; then
@@ -424,6 +480,10 @@ if [ -n "$problems" ]; then
   exit 1
 fi
 printf '%s' "$notes" >&2
+if [ "$create_app" = 1 ]; then
+  create_oauth_app
+  client_json="\"$oauth_client_id\""
+fi
 
 workbench_sources='' frame_sources='' workbench_json=null
 if [ "$workbench" = cdn ]; then
