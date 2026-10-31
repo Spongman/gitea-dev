@@ -5,7 +5,7 @@
 set -eu
 export LC_ALL=C
 
-usage='Usage: install GITEA_CUSTOM ROOT_URL [--oauth-client-id=ID] [--webviews=disabled|vscode-cdn]
+usage='Usage: install GITEA_CUSTOM [ROOT_URL] [--oauth-client-id=ID] [--webviews=disabled|vscode-cdn]
   [--connect-src="SOURCE ..."] [--extensions-allowlist="PUBLISHER.NAME ..."] [--gallery=URL|off]
   [--workbench=cdn|download|local] [--workbench-archive=PATH] [--app-ini=PATH]'
 cors_lines='[cors]
@@ -281,14 +281,42 @@ else
   problem "workbench.json: missing from the release $here; rebuild or extract the release again."
 fi
 
-if [ "$positional" -lt 2 ]; then
-  problem 'GITEA_CUSTOM and ROOT_URL: both are required, in this order.'
+if [ "$positional" -lt 1 ]; then
+  problem 'GITEA_CUSTOM: required, as the first argument.'
   usage_needed=1
+fi
+ini_path=''
+if [ "$has_app_ini" = 1 ]; then
+  if [ -n "$app_ini" ] && [ -f "$app_ini" ] && [ -r "$app_ini" ]; then
+    case $app_ini in /*) ini_path=$app_ini ;; *) ini_path=$(cd "$(dirname "$app_ini")" && pwd)/$(basename "$app_ini") ;; esac
+  else
+    problem "--app-ini: got $(show "$app_ini"); not a readable file; pass the app.ini Gitea runs with (ConfigFile in \"gitea help\")."
+  fi
+elif [ "$positional" -ge 1 ] && [ -n "$custom" ] && [ -f "$custom/conf/app.ini" ]; then
+  # Gitea's default configuration file is <custom path>/conf/app.ini (modules/setting/path.go).
+  ini_path=$(cd "$custom" && pwd)/conf/app.ini
+elif [ "$positional" -ge 1 ]; then
+  note 'GITEA_CUSTOM has no conf/app.ini; skipped the app.ini checks (pass --app-ini=PATH when Gitea reads its configuration elsewhere).'
 fi
 instance=''
 if [ "$positional" -ge 2 ]; then
   if valid_url "$root_url"; then instance=${root_url%/}
   else problem "ROOT_URL: got $(show "$root_url"); expected $url_expected, equal to Gitea's [server] ROOT_URL."
+  fi
+elif [ "$positional" -eq 1 ]; then
+  # ROOT_URL left out: Gitea's own [server] ROOT_URL from the app.ini.
+  if [ -n "$ini_path" ]; then
+    root_url=$(ini_value "$ini_path" server ROOT_URL)
+    case $root_url in
+      '' | *'%('*) problem "ROOT_URL: not given, and $ini_path sets no literal [server] ROOT_URL; pass ROOT_URL." ;;
+      *) if valid_url "$root_url"; then
+           instance=${root_url%/}
+           note "ROOT_URL: not given; using [server] ROOT_URL = $root_url from $ini_path."
+         else problem "ROOT_URL: not given; $ini_path has [server] ROOT_URL = $(show "$root_url"); expected $url_expected; pass ROOT_URL."
+         fi ;;
+    esac
+  elif [ "$has_app_ini" = 0 ] && [ -d "$custom" ]; then
+    problem "ROOT_URL: not given, and $custom has no conf/app.ini to read it from; pass ROOT_URL or --app-ini=PATH."
   fi
 fi
 client_json=null checked_client_id=''
@@ -369,19 +397,6 @@ if [ "$positional" -ge 1 ]; then
       problem "GITEA_CUSTOM: got $(show "$custom"); does not look like Gitea's custom directory (expected it empty or holding conf, public, templates or options)."
     fi
   fi
-fi
-ini_path=''
-if [ "$has_app_ini" = 1 ]; then
-  if [ -n "$app_ini" ] && [ -f "$app_ini" ] && [ -r "$app_ini" ]; then
-    case $app_ini in /*) ini_path=$app_ini ;; *) ini_path=$(cd "$(dirname "$app_ini")" && pwd)/$(basename "$app_ini") ;; esac
-  else
-    problem "--app-ini: got $(show "$app_ini"); not a readable file; pass the app.ini Gitea runs with (ConfigFile in \"gitea help\")."
-  fi
-elif [ "$positional" -ge 1 ] && [ -n "$custom" ] && [ -f "$custom/conf/app.ini" ]; then
-  # Gitea's default configuration file is <custom path>/conf/app.ini (modules/setting/path.go).
-  ini_path=$(cd "$custom" && pwd)/conf/app.ini
-elif [ "$positional" -ge 1 ]; then
-  note 'GITEA_CUSTOM has no conf/app.ini; skipped the app.ini checks (pass --app-ini=PATH when Gitea reads its configuration elsewhere).'
 fi
 [ -z "$ini_path" ] || check_app_ini "$ini_path"
 if [ "$workbench" = local ] && [ -n "$workbench_archive" ]; then

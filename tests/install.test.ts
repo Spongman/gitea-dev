@@ -366,7 +366,7 @@ test('every problem is reported, one line each, identically under every shell', 
     '--gallery: got "ftp://x"; expected off, or an https URL, or http on localhost, 127.0.0.1 or [::1], with a lowercase host and a plain path.',
   ]) assert.ok(lines.includes(expected), `missing: ${expected}\n${results[0]!.stderr}`);
   assert.ok(lines.indexOf('--bogus: unknown option; expected one of --oauth-client-id, --webviews, --connect-src, --extensions-allowlist, --gallery, --workbench, --workbench-archive, --app-ini.') < lines.indexOf('--workbench: got "bundled"; expected cdn, download or local.'));
-  assert.match(results[0]!.stderr, /^Usage: install GITEA_CUSTOM ROOT_URL/m);
+  assert.match(results[0]!.stderr, /^Usage: install GITEA_CUSTOM \[ROOT_URL\]/m);
   for (const result of results) assert.deepEqual(result.files, {}, result.kind);
 });
 
@@ -434,6 +434,36 @@ test('ROOT_URL must equal [server] ROOT_URL of Gitea\'s app.ini, found in GITEA_
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stderr, /^Note: GITEA_CUSTOM has no conf\/app\.ini; skipped the app\.ini checks \(pass --app-ini=PATH when Gitea reads its configuration elsewhere\)\.$/m);
   }
+});
+
+test('ROOT_URL, when left out, is [server] ROOT_URL of the app.ini found in GITEA_CUSTOM/conf or given with --app-ini', async () => {
+  const derived = await installAll(['--oauth-client-id=abc', ...LOCAL], appIni('[server]\nROOT_URL = "https://git.example.com/git/" ; comment\n'));
+  for (const result of derived) {
+    assert.equal(result.status, 0, `${result.kind}: ${result.stderr}`);
+    assert.equal(JSON.parse(result.files['public/assets/gitea-dev/configuration.json']!).instance, 'https://git.example.com/git', result.kind);
+    assert.match(result.stderr, /^Note: ROOT_URL: not given; using \[server\] ROOT_URL = https:\/\/git\.example\.com\/git\/ from \/.*\/conf\/app\.ini\.$/m);
+  }
+  const elsewhere = join(fixtureDir, 'derive-app.ini');
+  await writeFile(elsewhere, '[server]\nROOT_URL = https://code.example.com/\n');
+  for (const result of await installAll([...LOCAL, `--app-ini=${elsewhere}`])) {
+    assert.equal(result.status, 0, `${result.kind}: ${result.stderr}`);
+    assert.equal(JSON.parse(result.files['public/assets/gitea-dev/configuration.json']!).instance, 'https://code.example.com', result.kind);
+  }
+  for (const [name, args, prepare, expected] of [
+    ['no app.ini', [...LOCAL], undefined, /^ROOT_URL: not given, and .* has no conf\/app\.ini to read it from; pass ROOT_URL or --app-ini=PATH\.$/m],
+    ['no ROOT_URL in it', [...LOCAL], appIni('[server]\nHTTP_PORT = 3000\n'), /^ROOT_URL: not given, and \/.*\/conf\/app\.ini sets no literal \[server\] ROOT_URL; pass ROOT_URL\.$/m],
+    ['variable ROOT_URL', [...LOCAL], appIni('[server]\nROOT_URL = %(PROTOCOL)s://%(DOMAIN)s/\n'), /sets no literal \[server\] ROOT_URL; pass ROOT_URL\.$/m],
+    ['invalid ROOT_URL', [...LOCAL], appIni('[server]\nROOT_URL = ftp://x/\n'), /^ROOT_URL: not given; \/.*\/conf\/app\.ini has \[server\] ROOT_URL = "ftp:\/\/x\/"; expected an https URL/m],
+  ] as const) {
+    const results = await installAll([...args], prepare);
+    sameOutput(results);
+    assert.notEqual(results[0]!.status, 0, name);
+    assert.match(results[0]!.stderr, expected, name);
+    for (const result of results) assert.equal(result.files['public/assets/gitea-dev/configuration.json'], undefined, `${name}: ${result.kind} wrote files`);
+  }
+  // A ROOT_URL on the command line still wins and is still compared with the app.ini.
+  const given = await installAll(['https://git.example.com/', ...LOCAL], appIni('[server]\nROOT_URL = https://git.example.com/\n'));
+  for (const result of given) assert.equal(result.status, 0, `${result.kind}: ${result.stderr}`);
 });
 
 test('--workbench=cdn needs [cors] in app.ini allowing the CDN origin, and prints the lines to add', async () => {

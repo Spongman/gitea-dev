@@ -52,7 +52,8 @@ Installing copies files into Gitea's **custom directory** and needs no change to
 - **`ROOT_URL`**: the public address of your Gitea, exactly as set by `ROOT_URL` in the `[server]` section of
   Gitea's `app.ini`, for example `https://git.example.com/`. If Gitea is served under a sub-path, the sub-path
   is part of it: with `ROOT_URL = https://git.example.com/git/`, pass `https://git.example.com/git/`. The
-  editor builds every link and API call from this value, so it must match.
+  editor builds every link and API call from this value, so it must match. The installer reads it from `app.ini`
+  when you leave it out.
 - **Workbench source**: where browsers get the VS Code workbench (see step 2).
 - **OAuth application**: a registration in Gitea that lets the editor sign users in through Gitea's own login
   page, so nobody pastes a token (see step 3).
@@ -161,8 +162,8 @@ value for `--oauth-client-id`.
 ### 4. Run the installer
 
 ```sh
-sh gitea-dev/install.sh GITEA_CUSTOM ROOT_URL [OPTIONS]          # prebuilt release
-sh dist/gitea-dev/install.sh GITEA_CUSTOM ROOT_URL [OPTIONS]     # release built from source (npm run build)
+sh gitea-dev/install.sh GITEA_CUSTOM [ROOT_URL] [OPTIONS]        # prebuilt release
+sh dist/gitea-dev/install.sh GITEA_CUSTOM [ROOT_URL] [OPTIONS]   # release built from source (npm run build)
 ```
 
 Run it as the user that owns `GITEA_CUSTOM`. Before writing anything, the installer checks every argument, the
@@ -259,7 +260,7 @@ want; do not edit the installed files.
 | Argument | Default | What it does | When to use it |
 | --- | --- | --- | --- |
 | `GITEA_CUSTOM` (first) | required | Gitea's custom directory, where the files are installed. It must exist, be writable, and be empty or hold Gitea's `conf`, `public`, `templates` or `options`. | Always. Find it with `gitea help` (`CustomPath`). |
-| `ROOT_URL` (second) | required | Gitea's public address, equal to `[server] ROOT_URL` in `app.ini`: `https://host[:port][/sub/path]`, or `http` on `localhost`, `127.0.0.1` or `[::1]`; lowercase host, plain path. Must be `https` with `--workbench=cdn`. | Always. |
+| `ROOT_URL` (second) | `[server] ROOT_URL` of the `app.ini` | Gitea's public address, equal to `[server] ROOT_URL` in `app.ini`: `https://host[:port][/sub/path]`, or `http` on `localhost`, `127.0.0.1` or `[::1]`; lowercase host, plain path. Must be `https` with `--workbench=cdn`. | Leave it out when the `app.ini` is found (see `--app-ini`); the installer reads it and says which value it used. Pass it when `app.ini` has no literal `ROOT_URL`. |
 | `--workbench=cdn\|download\|local` | `cdn` | Where browsers get the workbench ([step 2](#2-choose-a-workbench-source)). | `download` or `local` to keep browsers from contacting Microsoft. |
 | `--workbench-archive=PATH` | none | The workbench archive file; it must match the SHA-256 pinned in `workbench.json`. Required by `--workbench=local`, refused otherwise. | Air-gapped installs. |
 | `--oauth-client-id=ID` | none | Enables **Sign In with OAuth** with this OAuth application ([step 3](#3-register-the-oauth-application-optional)): 1-128 letters, digits or hyphens. | When you registered the OAuth application. Without it users sign in with a personal access token. |
