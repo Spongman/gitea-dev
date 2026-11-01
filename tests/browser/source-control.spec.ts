@@ -238,6 +238,26 @@ test('the Commit button is disabled with no changes, enabled after an edit, and 
   await expect(button).toBeDisabled();
 });
 
+test('a commit while signed out offers Sign In, and the offer opens the OAuth sign-in', async ({ page, context, request, account }) => {
+  const fx = await fixture(request, account, 'signedout');
+  await readyAt(page, account, fx.repo);
+  await writeFile(page, 'a.txt', 'changed while signed out');
+  await expect.poll(() => pending(page)).toBe(1);
+  const before = (await fx.api('GET', `/repos/${account.user}/${fx.repo}/branches/main`)).json.commit.id;
+  expect(await command(page, 'gitea.commit', 'Signed out')).toMatchObject({ ok: false, code: 'ReadOnly' });
+  const toast = page.locator('.notifications-toasts .notification-toast', { hasText: 'You are not signed in.' });
+  await expect(toast).toBeVisible();
+  // The browser fixtures configure OAuth, so the offer starts the OAuth popup (without OAuth it asks for a token).
+  const popupEvent = context.waitForEvent('page');
+  await toast.getByRole('button', { name: 'Sign In' }).click();
+  const popup = await popupEvent;
+  await popup.waitForLoadState('domcontentloaded');
+  expect(popup.url()).toMatch(/\/login\/oauth\/authorize|\/user\/login/);
+  await popup.close();
+  expect((await fx.api('GET', `/repos/${account.user}/${fx.repo}/branches/main`)).json.commit.id).toBe(before);
+  expect(await pending(page)).toBe(1);
+});
+
 test('the more-actions menu groups Gitea actions like a git menu, and a changed file has Open File', async ({ page, request, account }) => {
   const fx = await fixture(request, account, 'menu');
   await readyAt(page, account, fx.repo);

@@ -303,7 +303,14 @@ export function activate(context: vscode.ExtensionContext): GiteaExtensionApi {
 				? `${conflicts.length} file(s) conflict with the remote branch; local changes were kept. Resolve them in Source Control.`
 				: messageOf(error);
 			log(`commit failed (${String(code)}): ${messageOf(error)}`);
-			void vscode.window.showErrorMessage(`Commit failed: ${shown}`);
+			// A server without "skip authorization" for OAuth applications (Gitea before 1.23, Forgejo) cannot sign in on load.
+			if (code === 'ReadOnly' && !session.readonlyHint && auth.kind(session.descriptor.instance) === undefined) {
+				void vscode.window.showErrorMessage(`Commit failed: ${shown} You are not signed in.`, 'Sign In').then(async (choice) => {
+					if (choice === 'Sign In') await vscode.commands.executeCommand((await oauthConfiguration()) ? 'gitea.signInOAuth' : 'gitea.signIn');
+				});
+			} else {
+				void vscode.window.showErrorMessage(`Commit failed: ${shown}`);
+			}
 			return { ok: false, error: messageOf(error), code: code ?? null, conflicts };
 		}
 	};
