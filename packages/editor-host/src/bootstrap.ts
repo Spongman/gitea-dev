@@ -43,7 +43,7 @@ if (deployment.workbench) {
     _VSCODE_WEB_PACKAGE_TTP: trustedTypes?.createPolicy('giteaWorkbenchPackages', {
       createScriptURL: (url: string) => {
         if (url.startsWith(config.assets)) return url;
-        throw new Error(`Invalid script url: ${url}`);
+        throw new Error(`Script URL outside the editor assets: ${url}`);
       },
     }),
   });

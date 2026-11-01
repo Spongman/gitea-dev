@@ -33,7 +33,7 @@ async function repository(request: APIRequestContext, { token, user }: Account, 
 test('the pinned workbench loads from the CDN, none from Gitea, and the extension host runs on vscode-cdn.net', async ({ page, account }) => {
   const workbench: string[] = [], policy: string[] = [];
   page.on('request', req => { if (/\/out\/(nls\.messages|vs\/workbench\/workbench\.web\.main\.internal)\.js$/.test(req.url())) workbench.push(req.url()); });
-  page.on('console', message => { if (/Refused|Content Security Policy|Invalid script url/.test(message.text())) policy.push(message.text()); });
+  page.on('console', message => { if (/Refused|Content Security Policy|Script URL outside the editor assets/.test(message.text())) policy.push(message.text()); });
   await ready(page, account.launch());
   expect(workbench.length).toBeGreaterThan(0);
   expect(workbench.filter(url => !url.startsWith(CDN_ROOT))).toEqual([]);
