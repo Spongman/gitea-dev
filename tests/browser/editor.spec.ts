@@ -108,9 +108,7 @@ test('loads the workbench and browser worker using local resources, with no remo
   expect(await command(page, 'gitea.status')).toMatchObject({ web: true, remoteName: null, terminals: 0 });
   expect(await page.evaluate(() => crossOriginIsolated)).toBe(true);
   await expect(page.locator('iframe.web-worker-ext-host-iframe')).toHaveAttribute('src', /^http:\/\/127\.0\.0\.1:8081\//);
-  // No process terminal: New Terminal is unavailable, and a terminal exists only once gitea.openShell runs (shell.spec.ts).
-  await command(page, 'workbench.action.terminal.new');
-  expect((await command(page, 'gitea.status')).terminals).toBe(0);
+  // No process terminal: none exists at load, and New Terminal opens the Gitea shell instead (shell.spec.ts).
   await expect(page.locator('.xterm')).toHaveCount(0);
   expect(external).toEqual([]);
   expect(sockets).toEqual([]);
