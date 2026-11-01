@@ -1,11 +1,18 @@
-{{/* Gitea v1.24.6 repo/header.tmpl renders this inside .overflow-menu-items for every repo page, with no permission guard. */}}
-{{if and (.Permission.CanRead ctx.Consts.RepoUnitTypeCode) (not .IsEmptyRepo)}}
+{{/* Rendered inside .overflow-menu-items of repo/header.tmpl for every repo page, with no permission guard: Gitea 1.20+ and Forgejo 11+. */}}
+{{/* The code unit constant: ctx.Consts.RepoUnitTypeCode on Gitea 1.22+, $.UnitTypeCode on Gitea 1.21 and Forgejo. Only the one that exists is evaluated. */}}
+{{$code := $.UnitTypeCode}}
+{{if not $code}}{{$code = ctx.Consts.RepoUnitTypeCode}}{{end}}
+{{if and (.Permission.CanRead $code) (not .IsEmptyRepo)}}
 	{{/* Pages without a repo ref (issues, pulls, wiki, ...) fall back to the default branch. */}}
 	{{$owner := .Repository.OwnerName}}
 	{{$repo := .Repository.Name}}
 	{{$ref := .Repository.DefaultBranch}}
 	{{$refKind := "branch"}}
-	{{with .RefFullName}}{{if .RefType}}{{$ref = .ShortName}}{{$refKind = .RefType}}{{end}}{{end}}
+	{{/* Gitea 1.24+ sets RefFullName; Forgejo and older Gitea set IsViewTag, IsViewCommit and IsViewBranch with the name. */}}
+	{{if .RefFullName}}{{with .RefFullName}}{{if .RefType}}{{$ref = .ShortName}}{{$refKind = .RefType}}{{end}}{{end}}
+	{{else if $.IsViewTag}}{{$ref = $.TagName}}{{$refKind = "tag"}}
+	{{else if $.IsViewCommit}}{{$ref = $.CommitID}}{{$refKind = "commit"}}
+	{{else if $.IsViewBranch}}{{$ref = $.BranchName}}{{end}}
 	{{/* Pull request pages open the head: its branch (a fork's repo for fork PRs), else the head commit, which the base repo keeps at refs/pull/N/head. */}}
 	{{with .Issue}}{{if and .IsPull .PullRequest}}
 		{{if $.HeadBranchLink}}

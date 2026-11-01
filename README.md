@@ -28,8 +28,14 @@ Features:
 
 ## Requirements
 
-- **Gitea**: the test suites run against Gitea 1.24.6; the local demo instance (`npm run instance:start`) runs
-  28.2.0. Other versions are untested. Settings Sync needs Gitea 1.24 or later.
+- **Gitea or Forgejo**: the test suites run against Gitea 1.24.6; the local demo instance (`npm run instance:start`)
+  runs 28.2.0. The installer and the Web IDE tab were also run against Gitea 1.21.11, 1.22.6 and 1.23.8 and Forgejo
+  11 and 12 (a disposable server for each; no browser suite). Differences by version:
+  - Gitea before 1.23 and Forgejo have no "skip authorization" option for OAuth applications. Users approve an
+    authorization page at each sign-in, and the editor does not sign in on load: the first commit offers **Sign In**.
+  - Gitea before 1.24 does not tell templates the viewed ref; the tab takes it from the older variables. Forgejo
+    and Gitea 1.21 have no `ctx.Consts`; the tab takes the code unit from `UnitTypeCode`.
+  - Settings Sync needs Gitea 1.24 or later.
 - **Browsers**: Chromium, Firefox and WebKit (Safari's engine). The editor needs service workers and
   cross-origin isolation, which browsers allow only over HTTPS or on `http://localhost`, `127.0.0.1` or
   `[::1]`; it refuses to start otherwise.

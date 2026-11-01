@@ -24,7 +24,7 @@ Restart Gitea after the template is installed or changed; static files need no r
 Verified in `templates/repo/header.tmpl` at v1.24.6 (`github.com/go-gitea/gitea`, tag `v1.24.6`):
 
 - `header.tmpl:220`: `{{template "custom/extra_tabs" .}}` inside `.overflow-menu-items`, after Activity and before Settings. It is the intended extension point.
-- `header.tmpl:138-143`: the Code tab's `CanRead` guard closes at line 142, before line 220. `extra_tabs` is therefore **not** permission-guarded by Gitea. The template checks `.Permission.CanRead ctx.Consts.RepoUnitTypeCode` and `not .IsEmptyRepo` itself.
+- `header.tmpl:138-143`: the Code tab's `CanRead` guard closes at line 142, before line 220. `extra_tabs` is therefore **not** permission-guarded by Gitea. The template checks `.Permission.CanRead` for the code unit and `not .IsEmptyRepo` itself. It takes the code unit from `$.UnitTypeCode` (Gitea 1.21, Forgejo 11 and 12) or else `ctx.Consts.RepoUnitTypeCode` (Gitea 1.22 and later); only the one that exists is evaluated.
 - The header renders on all repo pages (code, issues, pulls, wiki, ...), so the tab appears on all of them.
 - `templates/custom/extra_tabs.tmpl` ships empty upstream, so installing this file replaces nothing.
 
@@ -94,7 +94,9 @@ Register the editor's public OAuth application with `skip_secondary_authorizatio
 
 ## Limits
 
-- Versions other than 1.24.6 and 28.2.0 are untested. The full disposable test suite targets 1.24.6; on 28.2.0 only the rendered tab was checked.
+- The full disposable test suite targets 1.24.6. The rendered tab (repository root, branch, tag, commit, file and issues pages) and the installer, including `--create-oauth-app`, were also run against Gitea 1.21.11, 1.22.6, 1.23.8 and 28.2.0 and Forgejo 11 and 12; pull request pages are checked on 1.24.6 only.
+- Before Gitea 1.24 there is no `.RefFullName`; the template reads `.IsViewTag`/`.TagName`, `.IsViewCommit`/`.CommitID` and `.IsViewBranch`/`.BranchName`, which Gitea 1.21 to 1.23 and Forgejo set (Gitea 1.24 does not).
+- Gitea before 1.23 and Forgejo have no `skip_secondary_authorization` on OAuth applications (API, form or database), so the public client cannot skip the consent page: sign-in is by popup at each session and `--create-oauth-app` notes this instead of checking the option.
 - A pull request whose head is in a fork the viewer cannot read opens that fork and fails to load; the template does not check the viewer's access to the fork.
 - The Code-unit permission guard is present, but a visible repository with its Code unit hidden is not exercised in the fixture.
 - Fomantic modal suppression is covered by DOM tests, not a live open-modal browser test.
