@@ -202,7 +202,10 @@ create_oauth_app() {
   existing=$(printf '%s' "$body" | tr '}' '\n' | grep "\"name\":\"$oauth_name\"" | head -n 1) || existing=''
   if [ -n "$existing" ]; then
     case $existing in *'"confidential_client":false'*) ;; *) die "--create-oauth-app: the OAuth application \"$oauth_name\" is confidential; delete it or register a public one (confidential_client false)." ;; esac
-    case $existing in *'"skip_secondary_authorization":true'*) ;; *) die "--create-oauth-app: the OAuth application \"$oauth_name\" does not skip authorization for public clients; check that option in Settings > Applications, or delete it." ;; esac
+    # A server before Gitea 1.23, or Forgejo, has no such option and does not list it.
+    case $existing in
+      *'"skip_secondary_authorization":false'*) die "--create-oauth-app: the OAuth application \"$oauth_name\" does not skip authorization for public clients; check that option in Settings > Applications, or delete it." ;;
+    esac
     case $existing in *"\"$callback\""*) ;; *) die "--create-oauth-app: the OAuth application \"$oauth_name\" lacks the redirect URI $callback; add it in Settings > Applications, or delete it." ;; esac
     app_action=Found
   else
@@ -216,6 +219,10 @@ create_oauth_app() {
   oauth_client_id=$(printf '%s' "$existing" | sed -n 's/.*"client_id":"\([^"]*\)".*/\1/p' | head -n 1)
   matches "$oauth_client_id" "$CLIENT_ID_RE" || die "--create-oauth-app: Gitea's answer holds no usable client_id."
   printf '%s\n' "$app_action OAuth application \"$oauth_name\" with Client ID $oauth_client_id (owned by the owner of GITEA_TOKEN)." >&2
+  case $existing in
+    *'"skip_secondary_authorization":true'*) ;;
+    *) printf '%s\n' 'Note: this server has no "skip authorization" option for OAuth applications (Gitea before 1.23, Forgejo); users approve an authorization page at each sign-in, and the editor does not sign in on load.' >&2 ;;
+  esac
 }
 # Online checks against the running Gitea at ROOT_URL; skipped with a note when it does not answer.
 check_gitea() {

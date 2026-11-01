@@ -543,6 +543,8 @@ async function fakeGitea(behavior: {
   gitea?: boolean; gateway?: boolean; appUrl?: string; cors?: boolean; clients?: Record<string, 'public' | 'confidential' | 'elsewhere'>;
   /** The token the user API accepts, the applications it lists, and the requests it received. */
   token?: string; apps?: Record<string, unknown>[]; requests?: AppRequest[];
+  /** Gitea before 1.23 and Forgejo: the application API has no skip_secondary_authorization field. */
+  noSkipField?: boolean;
 }) {
   const dir = await mkdtemp(join(tmpdir(), 'gitea-dev-tls-'));
   const made = spawnSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-days', '1',
@@ -570,7 +572,9 @@ async function fakeGitea(behavior: {
         if (req.headers.authorization !== `token ${behavior.token}`) { res.statusCode = 401; res.end('{"message":"token is required"}'); return; }
         if (req.method === 'GET') { res.end(JSON.stringify(behavior.apps ?? [])); return; }
         res.statusCode = 201;
-        res.end(JSON.stringify({ id: 1, client_id: FAKE_CLIENT, client_secret: 'secret', ...JSON.parse(body) }));
+        const created = { id: 1, client_id: FAKE_CLIENT, client_secret: 'secret', ...JSON.parse(body) };
+        if (behavior.noSkipField) delete created.skip_secondary_authorization;
+        res.end(JSON.stringify(created));
       });
     } else if (path === '/login/oauth/access_token') {
       let body = '';
@@ -616,6 +620,7 @@ test('--create-oauth-app finds or creates the public OAuth application with GITE
     assert.equal(clientIdOf(result.files), FAKE_CLIENT, result.kind);
     assert.ok(result.stderr.includes(`Created OAuth application "Gitea Web IDE" with Client ID ${FAKE_CLIENT}`), result.stderr);
     assert.ok(!result.stderr.includes(TOKEN), `${result.kind} printed the token`);
+    assert.doesNotMatch(result.stderr, /no "skip authorization" option/, result.kind);
   }
   const posts = created.requests.filter(request => request.method === 'POST');
   assert.equal(posts.length, created.results.length);
@@ -631,6 +636,20 @@ test('--create-oauth-app finds or creates the public OAuth application with GITE
     assert.ok(result.stderr.includes('Found OAuth application "Gitea Web IDE" with Client ID existing-client-id'), result.stderr);
   }
   assert.equal(found.requests.filter(request => request.method === 'POST').length, 0);
+
+  // A server without the option (Gitea before 1.23, Forgejo): created or reused, with a note that sign-in is not silent.
+  const withoutField = (value: Record<string, unknown>) => { const { skip_secondary_authorization: _omitted, ...rest } = value; return rest; };
+  const bareCreated = await run({ noSkipField: true }, ['--create-oauth-app']);
+  const bareFound = await run({ noSkipField: true }, ['--create-oauth-app'], undefined, base => [withoutField(app(base))]);
+  for (const [name, runResult, action, id] of [['created', bareCreated, 'Created', FAKE_CLIENT], ['found', bareFound, 'Found', 'existing-client-id']] as const) {
+    for (const result of runResult.results) {
+      assert.equal(result.status, 0, `${name} ${result.kind}: ${result.stderr}`);
+      assert.equal(clientIdOf(result.files), id, `${name} ${result.kind}`);
+      assert.ok(result.stderr.includes(`${action} OAuth application "Gitea Web IDE" with Client ID ${id}`), result.stderr);
+      assert.match(result.stderr, /^Note: this server has no "skip authorization" option for OAuth applications \(Gitea before 1\.23, Forgejo\)/m, `${name} ${result.kind}`);
+    }
+  }
+  assert.equal(bareFound.requests.filter(request => request.method === 'POST').length, 0);
 
   // Refused, with nothing installed.
   const refusals: [string, Parameters<typeof fakeGitea>[0], string[], Record<string, string> | undefined, ((base: string) => Record<string, unknown>[]) | undefined, string | RegExp][] = [
