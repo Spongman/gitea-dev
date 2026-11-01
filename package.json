@@ -28,10 +28,10 @@
     "@playwright/test": "1.56.1",
     "@types/node": "22.18.8",
     "@types/vscode": "1.104.0",
-    "esbuild": "0.25.11",
-    "fake-indexeddb": "6.2.4",
+    "esbuild": "0.28.2",
+    "fake-indexeddb": "6.2.7",
     "happy-dom": "21.0.4",
-    "tsx": "4.20.6",
+    "tsx": "4.23.15",
     "typescript": "5.9.3"
   },
   "overrides": {
