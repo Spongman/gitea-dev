@@ -17,7 +17,7 @@ const URL = 'https://127.0.0.1:9/vscode-web.tar.gz';
 async function sandbox(t: TestContext, pin: object): Promise<string> {
 	const dir = await mkdtemp(join(tmpdir(), 'build-test-'));
 	t.after(() => rm(dir, { recursive: true, force: true }));
-	for (const name of ['node_modules', 'gitea', 'scripts']) await symlink(join(repoRoot, name), join(dir, name));
+	for (const name of ['node_modules', 'gitea', 'scripts', 'LICENSE']) await symlink(join(repoRoot, name), join(dir, name));
 	const stubs: Record<string, string> = {
 		'packages/gitea-vscode-web/src/extension.ts': 'export {};\n',
 		'packages/gitea-vscode-web/src/shell/zlib-stub.ts': 'export {};\n',
@@ -59,6 +59,10 @@ test('the release holds only our code and the pin; the build fetches no workbenc
 	const listed = await files(release);
 	assert.ok(listed.includes(`custom/public/assets/gitea-dev/${version}/extension/package.json`));
 	assert.deepEqual(listed.filter(path => /(^|\/)(workbench|out|node_modules)\//.test(path)), []);
+	assert.equal(await readFile(join(release, 'LICENSE'), 'utf8'), await readFile(join(repoRoot, 'LICENSE'), 'utf8'));
+	const notices = await readFile(join(release, 'THIRD_PARTY_NOTICES.txt'), 'utf8');
+	assert.match(notices, /^file-type@\S+$/m);
+	assert.match(notices, /^re2js@\S+$/m);
 	const worker = await readFile(join(release, 'custom/public/assets/gitea-dev/coi-sw.js'), 'utf8');
 	assert.ok(worker.includes('"@SCRIPT_HASHES@"'));
 	const index = await readFile(join(release, 'custom/public/assets/gitea-dev/index.html'), 'utf8');

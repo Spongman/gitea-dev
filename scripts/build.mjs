@@ -6,8 +6,16 @@ import { build } from 'esbuild';
 import { createHash } from 'node:crypto';
 import { chmod, cp, mkdir, readFile, readdir, writeFile, rm } from 'node:fs/promises';
 import { join, relative } from 'node:path';
+import { INLINED, noticeText, packageDirs, withDependencies } from './notices.mjs';
 
 const browser = { bundle: true, platform: 'browser', target: 'es2022' };
+
+// Every bundled input, to credit the npm packages the release contains.
+const inputs = new Set();
+async function bundle(options) {
+  const { metafile } = await build({ ...options, metafile: true });
+  for (const path of Object.keys(metafile.inputs)) inputs.add(path);
+}
 
 // Install replaces @WORKBENCH_SOURCES@, @GALLERY_SOURCES@, @CONNECT_SOURCES@ and @FRAME_SOURCES@ with " source..." or "".
 const PAGE_CSP = [
@@ -28,13 +36,13 @@ for (const [key, pattern] of [['commit', /^[0-9a-f]{40}$/], ['sha256', /^[0-9a-f
 
 await rm('dist', { recursive: true, force: true });
 await mkdir('dist/extension/dist', { recursive: true });
-await build({
+await bundle({
   ...browser, entryPoints: ['packages/gitea-vscode-web/src/extension.ts'],
   outfile: 'dist/extension/dist/extension.js', format: 'cjs', external: ['vscode'],
   // just-bash's browser build imports node:zlib for gzip, gunzip and zcat only.
   alias: { 'node:zlib': './packages/gitea-vscode-web/src/shell/zlib-stub.ts' },
 });
-await build({
+await bundle({
   ...browser, format: 'esm', outdir: 'dist/host',
   entryPoints: ['bootstrap', 'oauth-callback', 'start'].map(name => `packages/editor-host/src/${name}.ts`),
 });
@@ -72,7 +80,7 @@ await writeFile(`${versioned}/host.css`, hostCss);
 await mkdir(`${versioned}/webview-disabled`, { recursive: true });
 await writeFile(`${versioned}/webview-disabled/index.html`, webviewDisabled);
 for (const name of ['start.js', 'oauth-callback.js']) await cp(`dist/host/${name}`, `${assets}/${name}`);
-await build({
+await bundle({
   ...browser, entryPoints: ['packages/editor-host/src/coi-sw.ts'], outfile: `${assets}/coi-sw.js`, format: 'iife',
   define: { __PAGE_CSP__: JSON.stringify(PAGE_CSP), __IFRAME_CSP__: JSON.stringify(IFRAME_CSP) },
 });
@@ -87,5 +95,7 @@ await writeFile(`${release}/VERSION`, `${version}\n`);
 // One field per line: install.sh reads it with sed.
 await writeFile(`${release}/workbench.json`, `${JSON.stringify({ version: pin.version, commit: pin.commit, url: pin.url, sha256: pin.sha256 }, null, 2)}\n`);
 await cp('scripts/install.sh', `${release}/install.sh`);
+await cp('LICENSE', `${release}/LICENSE`);
+await writeFile(`${release}/THIRD_PARTY_NOTICES.txt`, await noticeText(new Set([...packageDirs(inputs), ...await withDependencies(INLINED)])));
 await chmod(`${release}/install.sh`, 0o755);
 console.log(`Built ${release} (version ${version}).`);

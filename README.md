@@ -66,8 +66,8 @@ Installing copies files into Gitea's **custom directory** and needs no change to
 ### 1. Get the release
 
 The release is a directory, `gitea-dev/`, with the installer (`install.sh`), the editor files, Gitea's template
-for the Web IDE tab, and `workbench.json`, which pins the exact workbench build by commit and SHA-256 checksum.
-It contains no Microsoft code.
+for the Web IDE tab, `workbench.json`, which pins the exact workbench build by commit and SHA-256 checksum, and
+`LICENSE` and `THIRD_PARTY_NOTICES.txt`. It contains no Microsoft code.
 
 Either download a prebuilt archive and check it:
 
@@ -469,7 +469,9 @@ The Gitea client library is described in [packages/gitea-repository/README.md](p
 
 ## License
 
-[MIT](LICENSE). The release archive contains no Microsoft code. just-bash, bundled into the extension, is
-Apache-2.0 (`node_modules/just-bash/package.json`). The VS Code web workbench is Microsoft's, under the terms in
+[MIT](LICENSE). The release archive contains no Microsoft code. The npm packages bundled into it, among them
+just-bash (Apache-2.0) and the packages its browser bundle inlines, are credited with their license texts in the
+release's `THIRD_PARTY_NOTICES.txt`; [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) covers the Microsoft typings
+in this repository. The VS Code web workbench is Microsoft's, under the terms in
 the `LICENSE` file of its archive: in `download` and `local` modes the installer installs it into
 `$GITEA_CUSTOM`, and in `cdn` mode browsers load it from Microsoft.
