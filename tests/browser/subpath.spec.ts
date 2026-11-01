@@ -146,6 +146,8 @@ test('the launch link and the period shortcut open the editor under the sub-path
 test('OAuth sign-in and silent sign-in use the sub-path, and the repository is read and committed with the OAuth token', async ({ page, context }) => {
   const callbacks: string[] = [];
   context.on('request', req => {
+    // The editor's service worker re-fetches pages for isolation headers; Playwright 1.61 reports those too.
+    if (req.serviceWorker()) return;
     if (new URL(req.url()).pathname.endsWith('/oauth-callback.html')) callbacks.push(`${req.resourceType()} ${new URL(req.url()).pathname}`);
   });
   await ready(page);

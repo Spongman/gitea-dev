@@ -127,7 +127,11 @@ node scripts/setup-webkit.mjs
 
 The script downloads verified Ubuntu packages into `data/browser-libs`; it does
 not install system packages. The Playwright configuration uses those libraries
-for WebKit only. Its static dependency checker is bypassed when this local
+for WebKit only, and sets `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu20.04-x64` so
+Playwright runs its Ubuntu 20.04 WebKit build. Playwright is pinned to 1.61.1, the
+newest version that works here: 1.62 sends that WebKit build a setting it does not
+know, and 1.63 and later ship no Ubuntu 20.04 WebKit, while their Ubuntu 22.04
+and 24.04 builds need glibc 2.35 or later (this host has 2.34). Its static dependency checker is bypassed when this local
 runtime is present; the actual headless browser tests still run. Media codec
 and headed WebKit behavior are not covered.
 

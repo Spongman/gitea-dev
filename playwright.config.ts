@@ -3,7 +3,12 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const localWebKitLibraries = resolve('data/browser-libs');
-if (existsSync(`${localWebKitLibraries}/libicudata.so.66`)) process.env.PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = '1';
+if (existsSync(`${localWebKitLibraries}/libicudata.so.66`)) {
+  process.env.PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = '1';
+  // The Ubuntu 20.04 WebKit build is the one the local libraries run (newer builds need glibc 2.35 or later).
+  // Playwright 1.62 and later do not work with it; 1.61.1 is the newest that does.
+  process.env.PLAYWRIGHT_HOST_PLATFORM_OVERRIDE ??= 'ubuntu20.04-x64';
+}
 const webkitEnv = existsSync(`${localWebKitLibraries}/libicudata.so.66`) ? {
   ...process.env,
   LD_PRELOAD: ['libicudata.so.66', 'libicuuc.so.66', 'libicui18n.so.66',
