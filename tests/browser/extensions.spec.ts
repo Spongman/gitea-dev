@@ -51,9 +51,10 @@ test('installs a browser extension from the gallery, runs it in the worker, and 
   await expect(page.locator('.extensions-list .extension-list-item').filter({ hasText: /Fixture/ })).toHaveCount(0);
 
   expect((await command(page, 'gitea.status')).pending).toBe(0);
-  // Only the configured gallery is contacted besides Gitea (plan.md, Constraints and decisions, item 5).
+  // Only the configured gallery and the webview host are contacted besides Gitea (plan.md, Constraints and decisions, items 5 and 6).
+  const webviewHost = /^https:\/\/[a-z0-9]+\.vscode-cdn\.net\/stable\/[0-9a-f]{40}\/out\/vs\/workbench\/contrib\/webview\/browser\/pre\//;
   expect(external.length).toBeGreaterThan(0);
-  expect(external.filter(url => !url.startsWith(`${gallery}/`))).toEqual([]);
+  expect(external.filter(url => !url.startsWith(`${gallery}/`) && !webviewHost.test(url))).toEqual([]);
   expect(sockets).toEqual([]);
 });
 

@@ -157,7 +157,7 @@ test('every shell writes identical trees with substituted CSP sources and config
   assert.ok(!Object.keys(files).some(path => path.endsWith('.tmp') || path.includes('.partial') || path.endsWith('.sub')));
 });
 
-test('defaults: gallery on at Open VSX, webviews disabled, no extra sources, no allowlist; gallery off removes its sources', async () => {
+test('defaults: gallery on at Open VSX, webviews on vscode-cdn, no extra sources, no allowlist; gallery off removes its sources', async () => {
   for (const [args, gallery, sources] of [
     [[], 'https://open-vsx.org', ' https://open-vsx.org https://openvsx.eclipsecontent.org'],
     [['--gallery', 'off'], null, ''],
@@ -168,9 +168,9 @@ test('defaults: gallery on at Open VSX, webviews disabled, no extra sources, no 
     for (const other of others) assert.deepEqual(other.files, first.files, `${other.kind} ${args.join(' ')}`);
     const config = JSON.parse(first.files['public/assets/gitea-dev/configuration.json']);
     assert.deepEqual(config, { instance: 'http://127.0.0.1:9', version: VERSION, oauthClientId: null, gallery,
-      extensionsAllowlist: null, connectSrc: '', webviews: 'disabled', testMode: false });
+      extensionsAllowlist: null, connectSrc: '', webviews: 'vscode-cdn', testMode: false });
     assert.match(first.files[`public/assets/gitea-dev/${VERSION}/${IFRAME}`], new RegExp(`connect-src 'self'${sources.replace(/\./g, '\\.')}; script-src`));
-    assert.equal(first.files['public/assets/gitea-dev/index.html'], `<meta content="script-src 'self'; img-src 'self'${sources}; frame-src 'self'">\n`);
+    assert.equal(first.files['public/assets/gitea-dev/index.html'], `<meta content="script-src 'self'; img-src 'self'${sources}; frame-src 'self' https://*.vscode-cdn.net">\n`);
   }
 });
 
@@ -487,9 +487,9 @@ test('an unreadable --workbench-archive is refused', { skip: process.getuid?.() 
   assert.ok(results[0]!.stderr.includes(`--workbench-archive: got "${locked}"; not a readable file; pass the archive from the url in the release's workbench.json.`));
 });
 
-test('--webviews is disabled unless given', async () => {
+test('--webviews is vscode-cdn unless given', async () => {
   for (const [args, webviews] of [
-    [[], 'disabled'], [['--webviews=vscode-cdn'], 'vscode-cdn'], [LOCAL, 'disabled'], [[...LOCAL, '--webviews=vscode-cdn'], 'vscode-cdn'],
+    [[], 'vscode-cdn'], [['--webviews=disabled'], 'disabled'], [LOCAL, 'vscode-cdn'], [[...LOCAL, '--webviews=disabled'], 'disabled'],
   ] as const) {
     const results = await installAll(['https://git.example.com', ...args]);
     for (const result of results) {

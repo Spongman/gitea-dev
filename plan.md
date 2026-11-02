@@ -57,9 +57,9 @@ extension host that starts no process, reads and writes only the repository over
    `https://open-vsx.org`); Open VSX answers CORS preflight with `access-control-allow-origin: *`. The
    operator's `--extensions-allowlist` is advisory (enforced in the browser). Automatic extension updates
    are off.
-6. **Webviews are opt-in.** `--webviews=vscode-cdn` allows Microsoft's `*.vscode-cdn.net` webview host in
-   `frame-src`. The default is `disabled`, a static page that says embedded pages are unavailable, so browsers
-   do not contact Microsoft at runtime.
+6. **Webviews on Microsoft's host.** The default, `--webviews=vscode-cdn`, allows Microsoft's `*.vscode-cdn.net`
+   webview host in `frame-src`. `disabled` serves a static page that says embedded pages are unavailable, so
+   browsers do not contact Microsoft at runtime.
 7. **Settings Sync in Actions variables.** The service worker answers the native sync protocol and stores
    the data in the user's Actions variables (`docs/settings-sync.md`).
 8. **Authentication.** OAuth Authorization Code with PKCE and no client secret, using an application with

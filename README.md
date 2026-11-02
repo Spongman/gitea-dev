@@ -184,7 +184,7 @@ sh gitea-dev/install.sh /var/lib/gitea/custom https://git.example.com/ --oauth-c
 
 # Air-gapped: archive copied in, no gallery
 sh gitea-dev/install.sh /var/lib/gitea/custom https://git.example.com/ --workbench=local \
-  --workbench-archive=/tmp/vscode-web.tar.gz --gallery=off
+  --workbench-archive=/tmp/vscode-web.tar.gz --gallery=off --webviews=disabled
 ```
 
 Rerunning with other options reconfigures the installation in place.
@@ -259,7 +259,7 @@ want; do not edit the installed files.
 | `--gallery=URL\|off` | `https://open-vsx.org` | The extension gallery the Extensions view uses, which browsers contact directly. `off` disables installing extensions. | `off` on air-gapped sites or to forbid extensions; a URL for a private Open VSX instance. |
 | `--extensions-allowlist="publisher.name ..."` | all | Only these gallery extensions are listed and downloadable. Ids are lowercased, separated by spaces, tabs, newlines or commas; an empty list is refused. | To limit extensions. Enforced by the browser, so not a security boundary ([Security model](#security-model)). |
 | `--connect-src="SOURCE ..."` | none | Extra hosts extensions may connect to: `https://host[:port][/path]`, `wss://`, or loopback `http://`/`ws://`; a leading `*.` needs two more labels. | When an extension needs a service. |
-| `--webviews=disabled\|vscode-cdn` | `disabled` | Webviews are the panels extensions draw with HTML (Markdown preview, extension pages). `vscode-cdn` hosts them on Microsoft's `https://*.vscode-cdn.net`; `disabled` shows a page saying they are unavailable. | `vscode-cdn` if you accept that browsers contact Microsoft for webviews. |
+| `--webviews=vscode-cdn\|disabled` | `vscode-cdn` | Webviews are the panels extensions draw with HTML (Markdown preview, extension pages). `vscode-cdn` hosts them on Microsoft's `https://*.vscode-cdn.net`; `disabled` turns them off. | The default. `disabled` when browsers cannot reach `*.vscode-cdn.net`, or must not contact Microsoft. |
 | `--app-ini=PATH` | `GITEA_CUSTOM/conf/app.ini` if present | The `app.ini` Gitea runs with, for the installer's check of `ROOT_URL`; the installer never changes it. | When Gitea's configuration is elsewhere (`ConfigFile` in `gitea help`, for example `/etc/gitea/app.ini`). |
 
 Webviews in detail: they always run on their own `*.vscode-cdn.net` origin, with no access to the Gitea page,
@@ -281,7 +281,7 @@ editing it.
 | `gallery` | Gallery address, or `null` when disabled |
 | `extensionsAllowlist` | Lowercase `publisher.name` ids, or `null` for all |
 | `connectSrc` | `--connect-src`, space-separated |
-| `webviews` | `disabled` or `vscode-cdn` |
+| `webviews` | `vscode-cdn` or `disabled` |
 | `testMode` | `false`; the browser test harness sets it |
 
 ### Editor settings
@@ -311,7 +311,7 @@ cannot install an extension (workspace recommendations are disabled). What an ex
   included, so an extension in an administrator's editor can use site administration.
 - **Stored personal access token**: an extension can decrypt it from the editor's browser storage.
 - **Network access**: only Gitea, the gallery and `--connect-src` hosts (CSP).
-- **Microsoft at runtime**: not contacted, except for webviews with `--webviews=vscode-cdn`.
+- **Microsoft at runtime**: contacted for webviews, unless `--webviews=disabled`.
 
 All extensions share one extension host with the editor's own extension, which holds the user's
 Gitea token, and any extension can ask it for a Gitea session (the `gitea` authentication provider, used by

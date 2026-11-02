@@ -5,7 +5,7 @@
 set -eu
 export LC_ALL=C
 
-usage='Usage: install GITEA_CUSTOM [ROOT_URL] [--oauth-client-id=ID | --create-oauth-app] [--webviews=disabled|vscode-cdn]
+usage='Usage: install GITEA_CUSTOM [ROOT_URL] [--oauth-client-id=ID | --create-oauth-app] [--webviews=vscode-cdn|disabled]
   [--connect-src="SOURCE ..."] [--extensions-allowlist="PUBLISHER.NAME ..."] [--gallery=URL|off]
   [--workbench=download|local] [--workbench-archive=PATH] [--app-ini=PATH]
   --create-oauth-app reads a personal access token from the environment variable GITEA_TOKEN.'
@@ -333,7 +333,7 @@ case $workbench in
   cdn) valid_mode=0; problem '--workbench: got "cdn"; the CDN refuses cross-origin loads from Gitea; use download or local.' ;;
   *) valid_mode=0; problem "--workbench: got $(show "$workbench"); expected download or local." ;;
 esac
-[ "$has_webviews" = 1 ] || webviews=disabled
+[ "$has_webviews" = 1 ] || webviews=vscode-cdn
 [ "$webviews" = disabled ] || [ "$webviews" = vscode-cdn ] || problem "--webviews: got $(show "$webviews"); expected disabled or vscode-cdn."
 if [ "$workbench" = local ] && [ -z "$workbench_archive" ]; then
   problem '--workbench=local: needs --workbench-archive=PATH, the pinned workbench archive.'

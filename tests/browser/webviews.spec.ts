@@ -1,5 +1,5 @@
-// Webview hosting (README "Browser extensions"). Default: disabled, no frame on another origin.
-// `--webviews=vscode-cdn`: real webviews (Markdown preview, an extension panel) load on *.vscode-cdn.net
+// Webview hosting (README "Browser extensions"). `--webviews=disabled`: no frame on another origin.
+// `--webviews=vscode-cdn` (default): real webviews (Markdown preview, an extension panel) load on *.vscode-cdn.net
 // and are isolated from the Gitea origin. Each describe has its own Gitea and install.
 // The isolation probe runs inside the webview itself (fixture extension `panel-check`), because Playwright
 // cannot evaluate in these cross-origin frames on Firefox.
@@ -146,7 +146,7 @@ test.describe('--webviews=vscode-cdn', () => {
   });
 });
 
-test.describe('default (--webviews=disabled)', () => {
+test.describe('--webviews=disabled', () => {
   test.describe.configure({ mode: 'serial' });
   let gitea: GiteaFixture;
 
