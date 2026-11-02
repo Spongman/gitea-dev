@@ -36,17 +36,15 @@ Features:
   - Gitea before 1.24 does not tell templates the viewed ref; the tab takes it from the older variables. Forgejo
     and Gitea 1.21 have no `ctx.Consts`; the tab takes the code unit from `UnitTypeCode`.
   - Settings Sync needs Gitea 1.24 or later.
-- **Browsers**: Chromium, Firefox and WebKit (Safari's engine). The editor needs service workers and
-  cross-origin isolation, which browsers allow only over HTTPS or on `http://localhost`, `127.0.0.1` or
-  `[::1]`; it refuses to start otherwise.
+- **Browsers**: Chromium, Firefox and WebKit (Safari's engine).
+- **HTTPS**: serve Gitea over HTTPS. Plain `http` works on `localhost`, `127.0.0.1` and `[::1]`.
 - **To build from source**: Node.js 22 or newer. The prebuilt release archive needs no Node.
 - **To install** (`install.sh`, no Node): a POSIX shell and the usual utilities, `tar`, `gzip` and one of
   `sha256sum`, `shasum` or `openssl`; `--workbench=download` (the default) also needs `curl` or `wget`. The installer's checks of a running Gitea use `curl` when it is present.
 
 ## Installation
 
-Installing copies files into Gitea's **custom directory** and needs no change to Gitea itself. The steps below
-explain what each one does.
+Installing copies files into Gitea's **custom directory** and needs no change to Gitea itself.
 
 ### Terms used below
 
@@ -72,7 +70,7 @@ explain what each one does.
 
 The release is a directory, `gitea-dev/`, with the installer (`install.sh`), the editor files, Gitea's template
 for the Web IDE tab, `workbench.json`, which pins the exact workbench build by commit and SHA-256 checksum, and
-`LICENSE` and `THIRD_PARTY_NOTICES.txt`. It contains no Microsoft code.
+`LICENSE` and `THIRD_PARTY_NOTICES.txt`.
 
 Either download a prebuilt archive and check it:
 
@@ -90,34 +88,23 @@ npm run build
 
 ### 2. Choose a workbench source
 
-Microsoft's license for the workbench does not allow redistributing it, so the release does not include it.
-The installer installs it into `GITEA_CUSTOM`, and Gitea serves it; its `--workbench` option decides where
-the installer gets it. Both modes install the same pinned build.
+The installer installs the pinned VS Code workbench into `GITEA_CUSTOM`, and Gitea serves it. Use the default,
+`download`, unless the install host has no internet access.
 
-| Mode | What happens | Choose it when | Requirements |
-| --- | --- | --- | --- |
-| `download` (default) | The installer downloads Microsoft's archive once, checks it against the pinned SHA-256, and installs it into `GITEA_CUSTOM`; Gitea serves it. | The install host can reach the internet. | The install host can reach `vscode.download.prss.microsoft.com`. |
-| `local` | As `download`, from an archive file you supply with `--workbench-archive=PATH`. | Air-gapped sites. | The archive named by `url` in the release's `workbench.json`, copied to the install host; it must match the pinned SHA-256. |
+| Mode | Use it when | Needs |
+| --- | --- | --- |
+| `download` (default, recommended) | The install host can reach `vscode.download.prss.microsoft.com`. | `curl` or `wget`. |
+| `local` | The install host has no internet access. | `--workbench-archive=PATH`: the archive named by `url` in the release's `workbench.json`, copied to the install host. |
 
-Either way browsers contact only Gitea (and the gallery, if enabled), and extensions run on the Gitea origin:
-they can use the user's Gitea web session, but can connect only to Gitea, the gallery and `--connect-src` hosts.
-See [Security model](#security-model).
-
-Browsers cannot load the workbench from Microsoft's CDN (`main.vscode-cdn.net`): it sends CORS headers only to
-Microsoft's own sites, such as `vscode.dev` and `github.dev`, so a Gitea page's module scripts from it are
-blocked. The installer refuses `--workbench=cdn`.
+Both modes install the same build, checked against the SHA-256 pinned in `workbench.json`.
 
 ### 3. Register the OAuth application (optional)
 
-Skip this step to let users sign in with personal access tokens only.
+Recommended. With it, users sign in through Gitea: they allow access once, and later loads sign in silently.
+Skip this step to have users sign in with personal access tokens.
 
-The OAuth application lets the editor sign a user in through Gitea: a Gitea sign-in popup asks the user once to
-allow access, and later loads sign in silently while the user is signed in to Gitea. The editor is a **public
-client**: it runs in the browser, cannot keep a secret, and proves itself with PKCE instead.
-
-There are three ways to register it. **Use the administrator UI (A)** unless you cannot: it is the only way to
-make an application that belongs to the whole instance. Gitea's API creates applications only for a user, so B and
-C produce an application owned by one account, which stops working if that account is deleted.
+**Use the administrator UI (A)**, so the application belongs to the instance. B and C create it under one user
+account.
 
 | | Way | Owner | Result |
 | --- | --- | --- | --- |
@@ -136,8 +123,8 @@ Under **Create a new OAuth2 Application**, fill in:
 | --- | --- |
 | Application Name | Any name users will recognize on the consent page, for example `Gitea Web IDE`. |
 | Redirect URIs | `<ROOT_URL>/assets/gitea-dev/oauth-callback.html`, for example `https://git.example.com/git/assets/gitea-dev/oauth-callback.html`. |
-| Confidential Client | Uncheck it (Gitea checks it by default): the editor is a public client and has no secret. |
-| Skip authorization for public clients after granting access once | Check it (Gitea enables it only once Confidential Client is unchecked): after the first consent, Gitea sends a signed-in user straight back, which is what makes the silent sign-in on each load work. Without it Gitea shows the consent page every time. |
+| Confidential Client | Uncheck it (Gitea checks it by default). |
+| Skip authorization for public clients after granting access once | Check it (Gitea enables it once Confidential Client is unchecked). |
 
 Click **Create Application** and copy the **Client ID**; it is the value of `--oauth-client-id`. The client
 secret Gitea shows is not used.
@@ -151,11 +138,9 @@ Read and Write, and add `--create-oauth-app` (not together with `--oauth-client-
 GITEA_TOKEN=TOKEN sh gitea-dev/install.sh /var/lib/gitea/custom --create-oauth-app
 ```
 
-Gitea must be running at `ROOT_URL`. The token goes to `curl` on its standard input, not its arguments, and is
-never printed. The installer looks in the token owner's applications for one named `Gitea Web IDE`. It reuses that
-one if it is public, skips authorization after one consent and has the redirect URI above; if it differs, the
-installer stops and says what to fix, and changes nothing. If there is none it creates one. A rerun therefore
-reuses the application. The installer prints the Client ID it used.
+Gitea must be running at `ROOT_URL`. The installer reuses the token owner's application named `Gitea Web IDE`, or
+creates one, and prints its Client ID. If the existing application has other settings, the installer says what to
+fix and changes nothing.
 
 #### C. Gitea API
 
@@ -178,12 +163,10 @@ sh gitea-dev/install.sh GITEA_CUSTOM [ROOT_URL] [OPTIONS]        # prebuilt rele
 sh dist/gitea-dev/install.sh GITEA_CUSTOM [ROOT_URL] [OPTIONS]   # release built from source (npm run build)
 ```
 
-Run it as the user that owns `GITEA_CUSTOM`. Before writing anything, the installer checks every argument, the
-custom directory, Gitea's `app.ini` (`GITEA_CUSTOM/conf/app.ini`, or `--app-ini`), the workbench archive, and,
-when Gitea answers at `ROOT_URL`, that it is Gitea with that `ROOT_URL` and that the OAuth application exists,
-is public and has the redirect URI. It prints every problem it
-finds, one line each with the value found and the value expected, and changes nothing. When Gitea does not answer
-(for example before its first start), it notes which checks it skipped and goes on.
+Run it as the user that owns `GITEA_CUSTOM`. The installer first checks its arguments, the custom directory,
+Gitea's `app.ini` (`GITEA_CUSTOM/conf/app.ini`, or `--app-ini`), the workbench archive and, when Gitea is
+running, `ROOT_URL` and the OAuth application. If anything is wrong it prints each problem with the value
+expected and changes nothing.
 
 It then writes:
 
@@ -252,7 +235,7 @@ To check: `<ROOT_URL>/assets/gitea-dev/configuration.json` shows your settings; 
   loads an extension's `browser` entry, so an extension with only `main`, Node-based extensions, desktop
   executables and arbitrary `.vsix` uploads do not work. The host also rejects ES-module entries (`.mjs`, or
   `"type": "module"` without a `.cjs` entry). Themes, snippets and browser formatters and language services work.
-  In `download` and `local` modes extensions can connect only to Gitea, the gallery and `--connect-src` hosts.
+  Extensions can connect to Gitea, the gallery and `--connect-src` hosts.
 
 Behavior details and limits are in [plan.md](plan.md#behavior-reference); sync details are in
 [docs/settings-sync.md](docs/settings-sync.md).
