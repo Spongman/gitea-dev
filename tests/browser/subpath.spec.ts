@@ -5,7 +5,7 @@ import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import net from 'node:net';
 import { startGitea, type GiteaFixture } from '../helpers/gitea.js';
 import { allowlist, createGalleryServer } from '../helpers/gallery.js';
-import { browserGiteaIni, browserWorkbench } from '../helpers/workbench.js';
+import { browserWorkbench } from '../helpers/workbench.js';
 // @ts-ignore untyped .mjs module
 import { install } from '../../scripts/run-installer.mjs';
 import { command, activeEditor, replaceEditorText, withoutTrustPrompt } from './fixtures.js';
@@ -31,7 +31,7 @@ test.beforeAll(async () => {
   galleryOrigin = `http://127.0.0.1:${galleryPort}`;
   const options = { gallery: galleryOrigin, extensionsAllowlist: allowlist.join(' '), testMode: true, ...browserWorkbench };
   gitea = await startGitea({
-    subPath: '/git', users: [{ name: 'owner', tokens: { full: ['all'] } }], extraIni: browserGiteaIni,
+    subPath: '/git', users: [{ name: 'owner', tokens: { full: ['all'] } }],
     // The template must exist before Gitea starts; the real ROOT_URL is known only afterwards.
     custom: custom => install({ ...options, rootUrl: 'http://127.0.0.1:9/git/', custom }),
   });

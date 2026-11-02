@@ -6,6 +6,7 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import { install } from './run-installer.mjs';
+import { cachedWorkbench } from './cached-workbench.mjs';
 import { ensurePinnedBinary } from './pinned-binary.mjs';
 
 process.umask(0o077);
@@ -24,14 +25,6 @@ const defaultAdmin = 'admin';
 const pin = JSON.parse(await readFile(join(root, 'config/gitea-instance.json'), 'utf8'));
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const common = ['--config', config, '--work-path', home, '--custom-path', join(home, 'custom')];
-// Browsers on the CDN extension host call Gitea cross-origin (README "Gitea settings").
-const corsSection = `[cors]
-ENABLED = true
-ALLOW_DOMAIN = https://*.vscode-cdn.net
-METHODS = GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS
-HEADERS = Content-Type,User-Agent,Authorization
-ALLOW_CREDENTIALS = false
-`;
 const environment = { ...process.env, GITEA_WORK_DIR: home, GITEA_CUSTOM: join(home, 'custom'), HOME: join(home, 'home') };
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const saveJson = async (path, value) => writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
@@ -106,12 +99,10 @@ ENABLED = false
 [log]
 MODE = console
 LEVEL = Info
-
-${corsSection}`, { mode: 0o600, flag: 'wx' });
+`, { mode: 0o600, flag: 'wx' });
   }
   const ini = await readFile(config, 'utf8');
-  const withCors = /^\[cors\]/m.test(ini) ? ini : `${ini.trimEnd()}\n\n${corsSection}`;
-  const listening = withCors.replace(/^HTTP_PORT = .*$/m, `HTTP_PORT = ${giteaPort}`)
+  const listening = ini.replace(/^HTTP_PORT = .*$/m, `HTTP_PORT = ${giteaPort}`)
     .replace(/^LOCAL_ROOT_URL = .*$/m, `LOCAL_ROOT_URL = http://127.0.0.1:${giteaPort}/`);
   if (listening !== ini) await writeFile(config, listening, { mode: 0o600 });
   cli(['migrate'], 'database migration');
@@ -152,8 +143,7 @@ async function installEditor(oauthClientId) {
   // This instance owns its custom directory, so the current template and shortcut replace the installed ones.
   for (const path of ['templates/custom/extra_tabs.tmpl', 'public/assets/gitea-dev/shortcut.js']) await rm(join(custom, path), { force: true });
   await mkdir(custom, { recursive: true });
-  // The editor loads the workbench from Microsoft's CDN, as released. testMode lets cdn mode use this http loopback address.
-  await install({ custom, rootUrl: origin, oauthClientId, appIni: config, workbench: 'cdn', testMode: true });
+  await install({ custom, rootUrl: origin, oauthClientId, appIni: config, ...cachedWorkbench() });
 }
 
 async function start() {

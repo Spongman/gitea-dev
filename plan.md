@@ -33,10 +33,12 @@ extension host that starts no process, reads and writes only the repository over
 2. **Client-only workbench, never redistributed.** The workbench is the official standalone web archive,
    pinned in `config/workbench.json`; VS Code Server contains a remote agent and is never used. Its license
    (the archive's `LICENSE`, "MICROSOFT PRE-RELEASE SOFTWARE LICENSE TERMS") rules out shipping it, so the
-   release holds only this project's code and the pin, and the installer's `--workbench` chooses the source:
-   `cdn` (default) loads the pinned build in the browser from `https://main.vscode-cdn.net/stable/<commit>/`;
-   `download` and `local` install the pinned archive, downloaded or from a file, after verifying its SHA-256,
-   and Gitea serves it. The editor refuses to start unless the page is `crossOriginIsolated`. The workbench registers no service worker of its own
+   release holds only this project's code and the pin. The installer installs the pinned archive after
+   verifying its SHA-256, and Gitea serves it; `--workbench` chooses the source: `download` (default) or
+   `local` (a file). Microsoft's CDN (`main.vscode-cdn.net`) is not a source: it sends
+   `access-control-allow-origin` only to allowlisted origins (`vscode.dev`, `github.dev`, `*.vscode-cdn.net`,
+   loopback), so a Gitea page cannot load its module scripts; the installer refuses `--workbench=cdn`.
+   The editor refuses to start unless the page is `crossOriginIsolated`. The workbench registers no service worker of its own
    (`serviceWorker.register` occurs 0 times in the pinned `workbench.web.main.internal.js`).
 3. **No process terminal; a Pseudoterminal shell.** `gitea.openShell` opens a just-bash shell
    (`packages/gitea-vscode-web/src/shell/`). A browser has no process terminal, so the host maps
@@ -45,23 +47,19 @@ extension host that starts no process, reads and writes only the repository over
    welcome view on the empty Terminal panel with an **Open Gitea Shell** button (`viewsWelcome` on `terminal`).
    The panel does not start a terminal by itself: the workbench creates one on opening only with a terminal
    backend, which exists only with a remote server.
-4. **Extensions are trusted like desktop VS Code.** With an installed workbench, gallery extensions run in a
+4. **Extensions are trusted like desktop VS Code.** Gallery extensions run in a
    same-origin iframe worker on the Gitea origin (`tests/browser/editor.spec.ts:77,111`) and can reach what
    the user's session reaches (`tests/browser/extension-reach.spec.ts`); the product configuration leaves
-   `webEndpointUrlTemplate` unset (`bootstrap.ts:112`), because Gitea sends `X-Frame-Options: SAMEORIGIN` and
+   `webEndpointUrlTemplate` unset (`bootstrap.ts:110`), because Gitea sends `X-Frame-Options: SAMEORIGIN` and
    the workbench's host page only accepts a different parent origin through hostname validation
-   (`webWorkerExtensionHostIframe.html:32,59`). In `cdn` mode the template is
-   `https://{{uuid}}.vscode-cdn.net/{{quality}}/{{commit}}`, so the host runs on Microsoft's page and origin,
-   with Microsoft's CSP (`connect-src` allows any `https:` host), and reaches Gitea through CORS with the
-   user's token, without the session cookie. Workspace recommendations are disabled.
+   (`webWorkerExtensionHostIframe.html:32,59`). Workspace recommendations are disabled.
 5. **Marketplace direct to Open VSX.** The browser calls the gallery itself (`--gallery`, default
    `https://open-vsx.org`); Open VSX answers CORS preflight with `access-control-allow-origin: *`. The
    operator's `--extensions-allowlist` is advisory (enforced in the browser). Automatic extension updates
    are off.
-6. **Webviews follow the workbench mode.** `--webviews=vscode-cdn` allows Microsoft's `*.vscode-cdn.net`
-   webview host in `frame-src`. It is the default with `--workbench=cdn`, whose page already loads from
-   Microsoft's CDN; with `download` and `local`, which avoid Microsoft at runtime, the default is `disabled`,
-   a static page that says embedded pages are unavailable. An explicit `--webviews` wins in every mode.
+6. **Webviews are opt-in.** `--webviews=vscode-cdn` allows Microsoft's `*.vscode-cdn.net` webview host in
+   `frame-src`. The default is `disabled`, a static page that says embedded pages are unavailable, so browsers
+   do not contact Microsoft at runtime.
 7. **Settings Sync in Actions variables.** The service worker answers the native sync protocol and stores
    the data in the user's Actions variables (`docs/settings-sync.md`).
 8. **Authentication.** OAuth Authorization Code with PKCE and no client secret, using an application with
@@ -85,7 +83,7 @@ Gitea repository page
 Start page + service worker (cross-origin isolation, CSP, Settings Sync store)
         |
         v
-Client-only Code OSS web workbench (pinned build: Microsoft's CDN, or installed into $GITEA_CUSTOM)
+Client-only Code OSS web workbench (pinned build, installed into $GITEA_CUSTOM)
         |
         v
 Bundled Gitea VS Code web extension (packages/gitea-vscode-web)
@@ -94,7 +92,7 @@ Bundled Gitea VS Code web extension (packages/gitea-vscode-web)
         `-- source control, search, shell, sign-in
         |
         v
-Gitea REST API (same origin, or CORS from the CDN extension host); Open VSX (optional, direct)
+Gitea REST API (same origin); Open VSX (optional, direct)
 ```
 
 Packages:
@@ -112,16 +110,7 @@ Packages:
 The build copies the pin into the release as `workbench.json` and puts the commit and archive SHA-256 into the
 release version's fingerprint (`scripts/build.mjs`). The installer (`scripts/install.sh`) does the rest at install time:
 
-- `cdn`: `configuration.json` gets `workbench: "https://main.vscode-cdn.net/stable/<commit>/"`, and the page
-  CSP gets that origin in `script-src`, `style-src`, `img-src`, `font-src`, `connect-src` and `worker-src`, and
-  `https://*.vscode-cdn.net` in `frame-src` (`@WORKBENCH_SOURCES@` and `@FRAME_SOURCES@`). The CDN answers
-  with `access-control-allow-origin: *` and `cross-origin-resource-policy: cross-origin`, which COEP
-  `require-corp` needs. `bootstrap.ts` loads the workbench from that root, sets the product
-  `webEndpointUrlTemplate`, `quality` and `commit`, and supplies the Trusted Types policy
-  `_VSCODE_WEB_PACKAGE_TTP`, without which the workbench's package loader rejects CDN script URLs such as
-  xterm's (`[trusted_script_src] Invalid script url`). The extension and host bundle stay on Gitea; the
-  extension host loads the extension through Gitea `[cors]`.
-- `download` and `local`: the installer verifies the archive's SHA-256 against the pin before extracting it,
+- The installer verifies the archive's SHA-256 against the pin before extracting it,
   drops Node-only parts (`node`, `bin` and `node_modules.asar` at any depth), restricts the extension-host
   iframe's `connect-src` to `'self'`, the gallery and `--connect-src`, and writes the inline script hashes of
   the workbench pages into the service worker (`@SCRIPT_HASHES@`), which adds them to each page's
@@ -130,8 +119,8 @@ release version's fingerprint (`scripts/build.mjs`). The installer (`scripts/ins
 Before writing anything the installer checks the release, every argument (unknown options, missing values,
 enumerations, options that do not apply to the mode), `GITEA_CUSTOM` (exists, writable, looks like Gitea's
 custom directory), Gitea's `app.ini` (`<custom>/conf/app.ini`, Gitea's default, `modules/setting/path.go`, or
-`--app-ini`: `[server] ROOT_URL`, and `[cors]` for `cdn`), the archive's SHA-256, and a running Gitea at
-`ROOT_URL` (`/api/v1/version`, `appUrl` in its pages, CORS for the CDN origin, and the OAuth client through the
+`--app-ini`: `[server] ROOT_URL`), the archive's SHA-256, and a running Gitea at
+`ROOT_URL` (`/api/v1/version`, `appUrl` in its pages, and the OAuth client through the
 token endpoint's error for an invalid code, which names an unknown client, a confidential one or an unregistered
 redirect URI before it checks the code). It prints every problem at once; checks that need an unreachable Gitea
 are skipped with a note, so offline and staged installs work.
@@ -260,7 +249,7 @@ configuration (`bootstrap.ts:95`).
   least recently used removed first). The download starts on the first text search (`gitea.archive.prefetch`:
   `onSearch`, the default, `onOpen` or `off`). Until it finishes, or for a repository over the limits (128 MiB,
   50,000 files by default), files are searched one at a time and the results carry a warning. The archive request
-  uses the same API client and token as every other request, so it also works from the `cdn` extension host.
+  uses the same API client and token as every other request.
 - TypeScript and JavaScript use the bundled browser language service. The COOP and COEP headers enable its
   SharedArrayBuffer file system bridge (`tests/browser/editor.spec.ts:179` resolves a cross-file Go to
   Definition). Repository identity is encoded in a lowercase URI authority because the TypeScript worker drops
@@ -318,16 +307,15 @@ takes precedence over the page on later loads, and offers to reload. It never wr
 Only web extensions run: the extension host is a web worker that loads an extension's `browser` entry
 (`_getEntryPoint(e){return e.browser}` in the pinned `extensionHostWorkerMain.js`), so an extension with only
 `main` never activates. The pinned host refuses ES modules (a `browser` entry ending in `.mjs`, or
-`"type": "module"` with an entry that does not end in `.cjs`). With an installed workbench the extension host's
-`connect-src` allows Gitea, the gallery hosts and `--connect-src`, so an extension that needs other hosts has
-reduced functionality; in `cdn` mode Microsoft's host page allows any `https:` host.
+`"type": "module"` with an entry that does not end in `.cjs`). The extension host's `connect-src` allows Gitea,
+the gallery hosts and `--connect-src`, so an extension that needs other hosts has reduced functionality.
 
 ## Security requirements
 
 - Never ship Microsoft's workbench in the release; install it only from the pinned archive after verifying its
-  SHA-256, or load the pinned build from Microsoft's CDN.
+  SHA-256.
 - Serve editor assets with `nosniff` and a restrictive CSP; only the extension-host iframe permits
-  `'unsafe-eval'`, and with an installed workbench its `connect-src` is `'self'` plus the gallery and
+  `'unsafe-eval'`, and its `connect-src` is `'self'` plus the gallery and
   `--connect-src` hosts.
 - Never place credentials in URLs, settings files, logs or workbench configuration. The launch URL carries only
   `owner`, `repository`, `ref` and `refKind`, plus an optional `path`.
@@ -348,23 +336,20 @@ reduced functionality; in `cdn` mode Microsoft's host page allows any `https:` h
 - Explicit commit creates one atomic Gitea commit.
 - Conflicting remote updates do not overwrite repository content.
 - The editor works when Gitea is installed under a sub-path.
-- The release contains no Microsoft code. By default browsers load the pinned workbench from Microsoft's CDN; an
-  operator can instead install the pinned archive, downloaded or from a local file, verified against the pin.
+- The release contains no Microsoft code. The installer installs the pinned workbench archive, downloaded or from
+  a local file, verified against the pin.
 - No editor action can execute a process on the Gitea host.
 
 ## Not implemented
 
 - Session bridge: a Gitea backend patch for sign-in from the web session (`docs/session-bridge.md`).
 - Pull request changed-files view and pull request editing.
-- Hardened extension host: in `cdn` mode the extension host runs on `<uuid>.vscode-cdn.net` without the Gitea
-  session, but the Gitea token still enters the shared extension worker; a broker on the main page that holds
-  the token is not built. With an installed workbench the host shares the Gitea origin. A CSP `sandbox` header
+- Hardened extension host: the host shares the Gitea origin and the Gitea token enters the shared extension
+  worker; a broker on the main page that holds the token is not built. A CSP `sandbox` header
   is an untested alternative: the host page compares `parentOrigin` with `window.origin` and `event.origin`
   (`webWorkerExtensionHostIframe.html:19,32,88,154`), and a sandboxed frame has an opaque origin.
-- Built-in Markdown preview under `--webviews=vscode-cdn` with `download` or `local`: the webview opens but stays
-  empty, because styles and scripts it loads from the Gitea origin lack a `Cross-Origin-Resource-Policy` header
-  (`tests/browser/webviews.spec.ts`, the `fixme` case). With `cdn` those files come from the CDN, which sends
-  `cross-origin-resource-policy: cross-origin`; the preview renders in Chromium and WebKit, and appeared empty
-  in Firefox.
+- Built-in Markdown preview under `--webviews=vscode-cdn`: the webview opens but stays empty, because styles and
+  scripts it loads from the Gitea origin lack a `Cross-Origin-Resource-Policy` header
+  (`tests/browser/webviews.spec.ts`, the `fixme` case).
 - Search that honors Git ignore files or follows symlinks; text search of LFS content.
 - Installing a `.vsix` file; extensions that need Node or desktop executables.

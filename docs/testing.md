@@ -61,24 +61,10 @@ that answers as Gitea 1.24.6 does (the real one is exercised by the browser harn
 the service worker's store: automatic turn-on, device-to-device sync, turning
 sync off, Clear Data in Cloud and extension sync.
 
-### CDN mode
+### HTTPS
 
-`BROWSER_WORKBENCH=cdn` installs with `--workbench=cdn` and starts every Gitea
-with the `[cors]` section README requires; it needs internet. Specs that assert
-no request leaves Gitea, that the extension host is on the Gitea origin, or
-that extensions share the Gitea session (`editor.spec.ts`, `extensions.spec.ts`,
-`extension-reach.spec.ts`, `shell.spec.ts`, `subpath.spec.ts`, `sync.spec.ts`,
-`webviews.spec.ts`) fail in this mode by design.
-`tests/browser/cdn.spec.ts` covers the mode itself and is skipped without it.
-Chromium gets the `local-network-access` permission. WebKit refuses an `http`
-Gitea from the CDN extension host; `BROWSER_HTTPS=1` serves Gitea over HTTPS
-with a throwaway certificate, and only `cdn.spec.ts` uses relative URLs
-throughout, so run it alone in that case:
-
-```sh
-BROWSER_WORKBENCH=cdn npx playwright test --project=chromium --project=firefox 2>&1 | tee -a ./build.log
-BROWSER_WORKBENCH=cdn BROWSER_HTTPS=1 npx playwright test tests/browser/cdn.spec.ts 2>&1 | tee -a ./build.log
-```
+`BROWSER_HTTPS=1` serves the shared Gitea over HTTPS with a throwaway certificate
+(`tests/browser/server.ts`).
 
 ### Parallel browser runs
 

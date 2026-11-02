@@ -18,7 +18,7 @@ async function start() {
     // when it was made as the workbench bundle started to evaluate.
     Object.assign(globalThis, { [COLOR_SCHEME_GLOBAL]: startupColorScheme(config.instance, globalThis.localStorage) });
     const version = new URL(`${config.version}/`, base);
-    const root = workbenchRoot(version, config);
+    const root = workbenchRoot(version);
     for (const href of [new URL('out/vs/workbench/workbench.web.main.internal.css', root), new URL('host.css', version)]) {
       const link = document.createElement('link');
       link.rel = 'stylesheet';

@@ -7,7 +7,7 @@ import { test, expect, type Page } from '@playwright/test';
 import net from 'node:net';
 import { startGitea, type GiteaFixture } from '../helpers/gitea.js';
 import { allowlist, createGalleryServer } from '../helpers/gallery.js';
-import { browserGiteaIni, browserWorkbench } from '../helpers/workbench.js';
+import { browserWorkbench } from '../helpers/workbench.js';
 // @ts-ignore untyped .mjs module
 import { install } from '../../scripts/run-installer.mjs';
 import { command, activeEditor, withoutTrustPrompt } from './fixtures.js';
@@ -33,7 +33,7 @@ const freePort = () => new Promise<number>((resolve, reject) => {
 async function deploy(webviews: 'disabled' | 'vscode-cdn', gallery = 'off') {
   const options = { gallery, webviews, extensionsAllowlist: allowlist.join(' '), testMode: true, ...browserWorkbench };
   const gitea = await startGitea({
-    users: [{ name: 'owner', tokens: { full: ['all'] } }], extraIni: browserGiteaIni,
+    users: [{ name: 'owner', tokens: { full: ['all'] } }],
     custom: custom => install({ ...options, rootUrl: 'http://127.0.0.1:9', custom }),
   });
   await install({ ...options, rootUrl: gitea.baseUrl, custom: gitea.customDir });

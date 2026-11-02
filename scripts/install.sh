@@ -1,29 +1,21 @@
 #!/bin/sh
 # Installs the Gitea Web IDE release (npm run build or npm run package) into $GITEA_CUSTOM without Node.
-# Needs a POSIX shell and utilities. --workbench=download and local also need tar, gzip and one of
-# sha256sum, shasum or openssl; download also needs curl or wget.
+# Needs a POSIX shell and utilities, tar, gzip and one of sha256sum, shasum or openssl;
+# --workbench=download also needs curl or wget.
 set -eu
 export LC_ALL=C
 
 usage='Usage: install GITEA_CUSTOM [ROOT_URL] [--oauth-client-id=ID | --create-oauth-app] [--webviews=disabled|vscode-cdn]
   [--connect-src="SOURCE ..."] [--extensions-allowlist="PUBLISHER.NAME ..."] [--gallery=URL|off]
-  [--workbench=cdn|download|local] [--workbench-archive=PATH] [--app-ini=PATH]
+  [--workbench=download|local] [--workbench-archive=PATH] [--app-ini=PATH]
   --create-oauth-app reads a personal access token from the environment variable GITEA_TOKEN.'
-cors_lines='[cors]
-ENABLED = true
-ALLOW_DOMAIN = https://*.vscode-cdn.net
-METHODS = GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS
-HEADERS = Content-Type,User-Agent,Authorization
-ALLOW_CREDENTIALS = false'
 url_expected='an https URL, or http on localhost, 127.0.0.1 or [::1], with a lowercase host and a plain path'
 die() { printf '%s\n' "$1" >&2; exit 1; }
 nl='
 '
-tab=$(printf '\t')
 # Problems are collected and reported together, one line each; notes say which checks were skipped.
-problems='' cors_problems='' notes='' usage_needed=0
+problems='' notes='' usage_needed=0
 problem() { problems="$problems$1$nl"; }
-cors_problem() { cors_problems="$cors_problems$1$nl"; }
 note() { notes="${notes}Note: $1$nl"; }
 # A found value in a message: quoted, on one line.
 show() { printf '"%s"' "$(printf '%s' "$1" | tr '\n' ' ')"; }
@@ -34,11 +26,8 @@ IFRAME=workbench/out/vs/workbench/services/extensions/worker/webWorkerExtensionH
 OPEN_VSX=https://open-vsx.org
 # Open VSX redirects file downloads to this host.
 OPEN_VSX_CONTENT=https://openvsx.eclipsecontent.org
-# Microsoft's CDN serves each workbench build at /stable/<commit>/; extension hosts run on its subdomains.
-CDN=https://main.vscode-cdn.net
-CDN_FRAMES='https://*.vscode-cdn.net'
-# An origin of the form the CDN extension host has, for the CORS checks.
-CDN_ORIGIN=https://v--gitea-dev-install-check.vscode-cdn.net
+# Microsoft's webview host for --webviews=vscode-cdn.
+WEBVIEW_FRAMES='https://*.vscode-cdn.net'
 # Validation patterns (grep -E).
 URL_RE='^(https://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?|http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]{1,5})?)(/[A-Za-z0-9._~-]+)*/?$'
 SOURCE_RE='^((https|wss)://(\*\.[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+|[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*)|(http|ws)://(localhost|127\.0\.0\.1|\[::1\]))(:([0-9]{1,5}|\*))?(/[A-Za-z0-9._~/-]*)?$'
@@ -126,24 +115,7 @@ ini_value() {
     }
     END { printf "%s", value }' "$1"
 }
-# Comma-separated list, trimmed and lowercased, one item per line.
-list_of() { printf '%s\n' "$1" | tr ',' '\n' | sed "s/^[ $tab]*//; s/[ $tab]*\$//" | tr '[:upper:]' '[:lower:]' | grep -v '^$' || true; }
-# Whether a Gitea [cors] ALLOW_DOMAIN entry admits the CDN origin (go-chi/cors: one "*" wildcard).
-allows_cdn() {
-  case $1 in
-    *'*'*) prefix=${1%%\**} suffix=${1#*\*}
-      case $CDN_ORIGIN in "$prefix"*"$suffix") return 0 ;; esac
-      return 1 ;;
-    *) [ "$1" = "$CDN_ORIGIN" ] ;;
-  esac
-}
-# Value of header $2 (lowercase) in the response headers $1.
-header_value() {
-  printf '%s\n' "$1" | tr -d '\r' | awk -v name="$2" '
-    index(tolower($0), name ":") == 1 { v = substr($0, length(name) + 2); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v) }
-    END { printf "%s", v }'
-}
-# Checks of the app.ini Gitea reads: ROOT_URL, and for --workbench=cdn the [cors] section.
+# Check of the app.ini Gitea reads: its ROOT_URL.
 check_app_ini() {
   ini_root=$(ini_value "$1" server ROOT_URL)
   case $ini_root in
@@ -152,25 +124,6 @@ check_app_ini() {
          problem "ROOT_URL: got $(show "$instance"); $1 has [server] ROOT_URL = $ini_root; pass that URL."
        fi ;;
   esac
-  [ "$workbench" = cdn ] || return 0
-  enabled=$(ini_value "$1" cors ENABLED)
-  case $(printf '%s' "$enabled" | tr '[:upper:]' '[:lower:]') in
-    1 | t | true | y | yes | on) ;;
-    *) cors_problem "$1 [cors] ENABLED: got $(show "$enabled"); --workbench=cdn needs true." ;;
-  esac
-  domains=$(ini_value "$1" cors ALLOW_DOMAIN)
-  if [ -n "$domains" ]; then
-    allowed=0
-    set -f
-    for entry in $(list_of "$domains"); do if allows_cdn "$entry"; then allowed=1; fi; done
-    set +f
-    [ "$allowed" = 1 ] || cors_problem "$1 [cors] ALLOW_DOMAIN: got $(show "$domains"); expected it to allow https://*.vscode-cdn.net."
-  fi
-  # The API adds Authorization itself (Gitea routers/api/v1/api.go); the OAuth token request sends Content-Type.
-  headers=$(ini_value "$1" cors HEADERS)
-  if [ -n "$headers" ] && ! list_of "$headers" | grep -qx -e '\*' -e 'content-type'; then
-    cors_problem "$1 [cors] HEADERS: got $(show "$headers"); expected it to include Content-Type."
-  fi
 }
 oauth_name='Gitea Web IDE'
 # Gitea API call as the owner of GITEA_TOKEN: METHOD PATH [JSON]. Prints the body, then the HTTP status on a last line.
@@ -227,7 +180,6 @@ create_oauth_app() {
 # Online checks against the running Gitea at ROOT_URL; skipped with a note when it does not answer.
 check_gitea() {
   skipped="the online checks of ROOT_URL"
-  [ "$workbench" != cdn ] || skipped="$skipped, [cors]"
   [ -z "$checked_client_id" ] || skipped="$skipped and --oauth-client-id"
   if ! command -v curl >/dev/null 2>&1; then note "curl not found; skipped $skipped."; return 0; fi
   if ! response=$(curl -s -m 10 -w '\n%{http_code}' "$instance/api/v1/version" 2>/dev/null); then
@@ -251,20 +203,6 @@ check_gitea() {
   elif [ "${app_url%/}" != "$instance" ]; then
     problem "ROOT_URL: got $(show "$root_url"); Gitea at that address reports ROOT_URL $app_url; pass that URL."
   fi
-  if [ "$workbench" = cdn ]; then
-    preflight=$(curl -s -m 10 -o /dev/null -D - -X OPTIONS -H "Origin: $CDN_ORIGIN" -H 'Access-Control-Request-Method: GET' \
-      -H 'Access-Control-Request-Headers: authorization' "$instance/api/v1/version" 2>/dev/null) || preflight=''
-    origin=$(header_value "$preflight" access-control-allow-origin)
-    if { [ "$origin" != "$CDN_ORIGIN" ] && [ "$origin" != '*' ]; } ||
-      ! list_of "$(header_value "$preflight" access-control-allow-headers)" | grep -qx authorization; then
-      cors_problem "ROOT_URL: Gitea at $instance refused a CORS preflight from $CDN_ORIGIN for its API with an Authorization header; --workbench=cdn needs [cors]."
-    fi
-    asset=$(curl -s -m 10 -o /dev/null -D - -H "Origin: $CDN_ORIGIN" "$instance/assets/img/logo.svg" 2>/dev/null) || asset=''
-    origin=$(header_value "$asset" access-control-allow-origin)
-    if [ "$origin" != "$CDN_ORIGIN" ] && [ "$origin" != '*' ]; then
-      cors_problem "ROOT_URL: Gitea at $instance sends no Access-Control-Allow-Origin for $CDN_ORIGIN on static files; --workbench=cdn needs [cors] to load the extension."
-    fi
-  fi
   if [ -n "$checked_client_id" ]; then
     # Gitea checks the client, its type and the redirect URI before the (deliberately invalid) code.
     callback=$instance/assets/gitea-dev/oauth-callback.html
@@ -283,11 +221,11 @@ check_gitea() {
 
 custom='' root_url='' positional=0 extra=''
 oauth_client_id='' has_client_id=0 webviews='' has_webviews=0 connect_src='' allowlist='' has_allowlist=0 gallery=$OPEN_VSX
-workbench=cdn workbench_archive='' app_ini='' has_app_ini=0 test_mode=0 create_app=0
+workbench=download workbench_archive='' app_ini='' has_app_ini=0 test_mode=0 create_app=0
 while [ $# -gt 0 ]; do
   arg=$1; shift
   case $arg in
-    # For the test harness: writes the test hook flag and allows an http loopback ROOT_URL with cdn. Not in the usage text.
+    # For the test harness: writes the test hook flag. Not in the usage text.
     --test-mode) test_mode=1; continue ;;
     --create-oauth-app) create_app=1; continue ;;
     --*=*) name=${arg%%=*}; value=${arg#*=} ;;
@@ -389,12 +327,13 @@ if [ "$has_client_id" = 1 ]; then
   fi
 fi
 valid_mode=1
-case $workbench in cdn | download | local) ;; *) valid_mode=0; problem "--workbench: got $(show "$workbench"); expected cdn, download or local." ;; esac
-# The page already loads from Microsoft's CDN in cdn mode, so webviews use its webview host by default.
-if [ "$has_webviews" = 0 ]; then
-  webviews=disabled
-  [ "$workbench" != cdn ] || webviews=vscode-cdn
-fi
+case $workbench in
+  download | local) ;;
+  # Microsoft's CDN sends CORS headers only to its own sites, so a Gitea origin cannot load the workbench from it.
+  cdn) valid_mode=0; problem '--workbench: got "cdn"; the CDN refuses cross-origin loads from Gitea; use download or local.' ;;
+  *) valid_mode=0; problem "--workbench: got $(show "$workbench"); expected download or local." ;;
+esac
+[ "$has_webviews" = 1 ] || webviews=disabled
 [ "$webviews" = disabled ] || [ "$webviews" = vscode-cdn ] || problem "--webviews: got $(show "$webviews"); expected disabled or vscode-cdn."
 if [ "$workbench" = local ] && [ -z "$workbench_archive" ]; then
   problem '--workbench=local: needs --workbench-archive=PATH, the pinned workbench archive.'
@@ -430,9 +369,6 @@ if [ "$has_allowlist" = 1 ]; then
   allow_json="[$allow_json]"
 fi
 set +f
-if [ "$workbench" = cdn ] && [ -n "$connect_joined" ]; then
-  problem "--connect-src: got $(show "$connect_src"); applies only to --workbench=download or local, because in cdn mode Microsoft's extension host page allows any https: host; remove it."
-fi
 gallery_json=null gallery_sources=''
 if [ "$gallery" != off ]; then
   if valid_url "$gallery"; then
@@ -445,9 +381,6 @@ if [ "$gallery" != off ]; then
     problem "--gallery: got $(show "$gallery"); expected off, or $url_expected."
   fi
 fi
-case $workbench:$instance:$test_mode in
-  cdn:http:*:0) problem "ROOT_URL: got $(show "$root_url"); --workbench=cdn needs https, because WebKit blocks an http Gitea from the CDN extension host; serve Gitea over HTTPS or use --workbench=download." ;;
-esac
 
 if [ "$positional" -ge 1 ]; then
   if [ -z "$custom" ] || [ ! -e "$custom" ]; then
@@ -474,15 +407,8 @@ if [ "$workbench" = local ] && [ -n "$workbench_archive" ]; then
 fi
 [ -z "$instance" ] || check_gitea
 
-problems="$problems$cors_problems"
 if [ -n "$problems" ]; then
   printf '%s' "$notes$problems" >&2
-  if [ -n "$cors_problems" ]; then
-    if [ -n "$ini_path" ]; then printf '%s\n' "Add to Gitea's app.ini ($ini_path) and restart Gitea:" >&2
-    else printf '%s\n' "Add to Gitea's app.ini and restart Gitea:" >&2
-    fi
-    printf '%s\n' "$cors_lines" >&2
-  fi
   [ "$usage_needed" = 0 ] || printf '%s\n' "$usage" >&2
   exit 1
 fi
@@ -492,21 +418,17 @@ if [ "$create_app" = 1 ]; then
   client_json="\"$oauth_client_id\""
 fi
 
-workbench_sources='' frame_sources='' workbench_json=null
-if [ "$workbench" = cdn ]; then
-  workbench_sources=" $CDN"
-  workbench_json="\"$CDN/stable/$pin_commit/\""
-fi
-[ "$webviews" != vscode-cdn ] && [ "$workbench" != cdn ] || frame_sources=" $CDN_FRAMES"
+frame_sources=''
+[ "$webviews" != vscode-cdn ] || frame_sources=" $WEBVIEW_FRAMES"
 test_json=false
 [ "$test_mode" = 0 ] || test_json=true
-config="{\"instance\":\"$instance\",\"version\":\"$version\",\"oauthClientId\":$client_json,\"gallery\":$gallery_json,\"extensionsAllowlist\":$allow_json,\"connectSrc\":\"$connect_joined\",\"webviews\":\"$webviews\",\"workbench\":$workbench_json,\"testMode\":$test_json}"
+config="{\"instance\":\"$instance\",\"version\":\"$version\",\"oauthClientId\":$client_json,\"gallery\":$gallery_json,\"extensionsAllowlist\":$allow_json,\"connectSrc\":\"$connect_joined\",\"webviews\":\"$webviews\",\"testMode\":$test_json}"
 script_hashes_json='{}'
 
 # Validated values and the pinned workbench's hashes contain no "|", "&" or "\", so they are literal
 # in the sed replacement.
 substitute() {
-  sed -e "s|@WORKBENCH_SOURCES@|$workbench_sources|g" -e "s|@GALLERY_SOURCES@|$gallery_sources|g" \
+  sed -e "s|@GALLERY_SOURCES@|$gallery_sources|g" \
     -e "s|@CONNECT_SOURCES@|$connect_sources|g" -e "s|@FRAME_SOURCES@|$frame_sources|g" \
     -e "s|\"@CONFIG@\"|$config|g" -e "s|\"@SCRIPT_HASHES@\"|$script_hashes_json|g" "$1" > "$1.sub"
   mv "$1.sub" "$1"
@@ -539,10 +461,8 @@ scratch=$assets/.$version.workbench
 rm -rf "$partial" "$scratch"
 mkdir -p "$assets"
 archive=$workbench_archive
-if [ "$workbench" != cdn ]; then
-  trap 'rm -rf "$scratch"' EXIT
-  mkdir "$scratch"
-fi
+trap 'rm -rf "$scratch"' EXIT
+mkdir "$scratch"
 if [ "$workbench" = download ]; then
   archive=$scratch/workbench.tar.gz
   if command -v curl >/dev/null 2>&1; then curl -fsSL -o "$archive" "$pin_url"
@@ -552,34 +472,32 @@ if [ "$workbench" = download ]; then
   [ "$(sha256_hex "$archive")" = "$pin_sha256" ] || die "The workbench downloaded from $pin_url does not match the pinned sha256 $pin_sha256."
 fi
 cp -R "$release/$version" "$partial"
-if [ "$workbench" != cdn ]; then
-  mkdir "$scratch/unpacked"
-  (cd "$scratch/unpacked" && gzip -dc "$archive" | tar -xf -)
-  set -- "$scratch/unpacked"/* "$scratch/unpacked"/.[!.]*
-  [ -d "$1" ] && [ ! -e "$2" ] || die 'The workbench archive must hold one top-level directory'
-  # Not served: Node-only workbench parts at any depth.
-  find "$1" \( -name node -o -name bin -o -name node_modules.asar \) -prune -exec rm -rf {} +
-  mv "$1" "$partial/workbench"
-  iframe=$partial/$IFRAME
-  [ -f "$iframe" ] || die "The workbench archive has no $IFRAME"
-  # Upstream allows every https: host; extensions get the gallery and the operator allowlist only.
-  [ "$(awk '{ n += gsub(/connect-src /, "") } END { print n + 0 }' "$iframe")" = 1 ] &&
-    grep -q 'connect-src [^;"]*;' "$iframe" || die "Unexpected CSP in $IFRAME"
-  sed "s/connect-src [^;\"]*;/connect-src 'self'@GALLERY_SOURCES@@CONNECT_SOURCES@;/g" "$iframe" > "$iframe.sub"
-  mv "$iframe.sub" "$iframe"
-  substitute "$iframe"
-  script_hashes_json=''
-  pages=$(cd "$partial" && find workbench -type f -name '*.html' | sort)
-  IFS='
+mkdir "$scratch/unpacked"
+(cd "$scratch/unpacked" && gzip -dc "$archive" | tar -xf -)
+set -- "$scratch/unpacked"/* "$scratch/unpacked"/.[!.]*
+[ -d "$1" ] && [ ! -e "$2" ] || die 'The workbench archive must hold one top-level directory'
+# Not served: Node-only workbench parts at any depth.
+find "$1" \( -name node -o -name bin -o -name node_modules.asar \) -prune -exec rm -rf {} +
+mv "$1" "$partial/workbench"
+iframe=$partial/$IFRAME
+[ -f "$iframe" ] || die "The workbench archive has no $IFRAME"
+# Upstream allows every https: host; extensions get the gallery and the operator allowlist only.
+[ "$(awk '{ n += gsub(/connect-src /, "") } END { print n + 0 }' "$iframe")" = 1 ] &&
+  grep -q 'connect-src [^;"]*;' "$iframe" || die "Unexpected CSP in $IFRAME"
+sed "s/connect-src [^;\"]*;/connect-src 'self'@GALLERY_SOURCES@@CONNECT_SOURCES@;/g" "$iframe" > "$iframe.sub"
+mv "$iframe.sub" "$iframe"
+substitute "$iframe"
+script_hashes_json=''
+pages=$(cd "$partial" && find workbench -type f -name '*.html' | sort)
+IFS='
 '
-  for page in $pages; do
-    hashes=$(script_hashes "$partial/$page")
-    [ -z "$hashes" ] || script_hashes_json="${script_hashes_json:+$script_hashes_json,}\"$page\":\"$hashes\""
-  done
-  IFS=$old_ifs
-  script_hashes_json="{$script_hashes_json}"
-  rm -rf "$scratch"
-fi
+for page in $pages; do
+  hashes=$(script_hashes "$partial/$page")
+  [ -z "$hashes" ] || script_hashes_json="${script_hashes_json:+$script_hashes_json,}\"$page\":\"$hashes\""
+done
+IFS=$old_ifs
+script_hashes_json="{$script_hashes_json}"
+rm -rf "$scratch"
 top=''
 for file in "$release"/*; do
   [ -f "$file" ] || continue

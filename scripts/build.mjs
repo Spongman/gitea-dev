@@ -1,7 +1,6 @@
 // Builds the static release tree dist/gitea-dev/: Gitea custom files, the editor host and extension
 // under a versioned directory, and the workbench pin. It contains no Microsoft workbench files:
-// scripts/install.sh copies the tree into $GITEA_CUSTOM and, unless the workbench
-// loads from Microsoft's CDN, fetch and install the pinned workbench there.
+// scripts/install.sh copies the tree into $GITEA_CUSTOM and installs the pinned workbench there.
 import { build } from 'esbuild';
 import { createHash } from 'node:crypto';
 import { chmod, cp, mkdir, readFile, readdir, writeFile, rm } from 'node:fs/promises';
@@ -17,17 +16,17 @@ async function bundle(options) {
   for (const path of Object.keys(metafile.inputs)) inputs.add(path);
 }
 
-// Install replaces @WORKBENCH_SOURCES@, @GALLERY_SOURCES@, @CONNECT_SOURCES@ and @FRAME_SOURCES@ with " source..." or "".
+// Install replaces @GALLERY_SOURCES@, @CONNECT_SOURCES@ and @FRAME_SOURCES@ with " source..." or "".
 const PAGE_CSP = [
-  "default-src 'none'", "script-src 'self' 'wasm-unsafe-eval' blob:@WORKBENCH_SOURCES@",
-  "style-src 'self' 'unsafe-inline'@WORKBENCH_SOURCES@", "img-src 'self' data: blob:@WORKBENCH_SOURCES@@GALLERY_SOURCES@",
-  "font-src 'self' data:@WORKBENCH_SOURCES@", "connect-src 'self'@WORKBENCH_SOURCES@@GALLERY_SOURCES@", "worker-src 'self' blob:@WORKBENCH_SOURCES@",
+  "default-src 'none'", "script-src 'self' 'wasm-unsafe-eval' blob:",
+  "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:@GALLERY_SOURCES@",
+  "font-src 'self' data:", "connect-src 'self'@GALLERY_SOURCES@", "worker-src 'self' blob:",
   "frame-src 'self'@FRAME_SOURCES@", "object-src 'none'", "base-uri 'none'", "form-action 'self'",
 ].join('; ');
-// The extension host iframe (installed workbench only): the gallery and the operator allowlist.
+// The extension host iframe: the gallery and the operator allowlist.
 const IFRAME_CSP = PAGE_CSP
   .replace("script-src 'self'", "script-src 'self' 'unsafe-eval'@GALLERY_SOURCES@")
-  .replace("connect-src 'self'@WORKBENCH_SOURCES@@GALLERY_SOURCES@", "connect-src 'self'@WORKBENCH_SOURCES@@GALLERY_SOURCES@@CONNECT_SOURCES@");
+  .replace("connect-src 'self'@GALLERY_SOURCES@", "connect-src 'self'@GALLERY_SOURCES@@CONNECT_SOURCES@");
 
 const pin = JSON.parse(await readFile('config/workbench.json', 'utf8'));
 for (const [key, pattern] of [['commit', /^[0-9a-f]{40}$/], ['sha256', /^[0-9a-f]{64}$/], ['url', /^https:\/\/[a-z0-9.-]+(:[0-9]{1,5})?(\/[A-Za-z0-9._~-]+)*$/]]) {

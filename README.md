@@ -40,14 +40,13 @@ Features:
   cross-origin isolation, which browsers allow only over HTTPS or on `http://localhost`, `127.0.0.1` or
   `[::1]`; it refuses to start otherwise.
 - **To build from source**: Node.js 22 or newer. The prebuilt release archive needs no Node.
-- **To install** (`install.sh`, no Node): a POSIX shell and the usual utilities. `--workbench=download`
-  and `--workbench=local` also need `tar`, `gzip` and one of `sha256sum`, `shasum` or `openssl`; `download`
-  also needs `curl` or `wget`. The installer's checks of a running Gitea use `curl` when it is present.
+- **To install** (`install.sh`, no Node): a POSIX shell and the usual utilities, `tar`, `gzip` and one of
+  `sha256sum`, `shasum` or `openssl`; `--workbench=download` (the default) also needs `curl` or `wget`. The installer's checks of a running Gitea use `curl` when it is present.
 
 ## Installation
 
-Installing copies files into Gitea's **custom directory** and needs no change to Gitea itself, except the
-`[cors]` setting in the default workbench mode. The steps below explain what each one does.
+Installing copies files into Gitea's **custom directory** and needs no change to Gitea itself. The steps below
+explain what each one does.
 
 ### Terms used below
 
@@ -92,42 +91,21 @@ npm run build
 ### 2. Choose a workbench source
 
 Microsoft's license for the workbench does not allow redistributing it, so the release does not include it.
-The installer's `--workbench` option decides where browsers get it. Every mode uses the same pinned build.
+The installer installs it into `GITEA_CUSTOM`, and Gitea serves it; its `--workbench` option decides where
+the installer gets it. Both modes install the same pinned build.
 
 | Mode | What happens | Choose it when | Requirements |
 | --- | --- | --- | --- |
-| `cdn` (default) | Browsers load the workbench from Microsoft's CDN, `https://main.vscode-cdn.net/stable/<commit>/`, on every load. Nothing from Microsoft is installed. | Users' browsers can reach the internet and you want the smallest install. | Gitea on HTTPS; `[cors]` enabled in Gitea's `app.ini`; browsers can reach `*.vscode-cdn.net`. |
-| `download` | The installer downloads Microsoft's archive once, checks it against the pinned SHA-256, and installs it into `GITEA_CUSTOM`; Gitea serves it. | Browsers must not contact Microsoft, but the install host can. | The install host can reach `vscode.download.prss.microsoft.com`. |
+| `download` (default) | The installer downloads Microsoft's archive once, checks it against the pinned SHA-256, and installs it into `GITEA_CUSTOM`; Gitea serves it. | The install host can reach the internet. | The install host can reach `vscode.download.prss.microsoft.com`. |
 | `local` | As `download`, from an archive file you supply with `--workbench-archive=PATH`. | Air-gapped sites. | The archive named by `url` in the release's `workbench.json`, copied to the install host; it must match the pinned SHA-256. |
 
-Trade-offs:
+Either way browsers contact only Gitea (and the gallery, if enabled), and extensions run on the Gitea origin:
+they can use the user's Gitea web session, but can connect only to Gitea, the gallery and `--connect-src` hosts.
+See [Security model](#security-model).
 
-- **Privacy**: in `cdn` mode Microsoft's CDN sees each user's IP address on every load, and the extension host
-  address names your Gitea origin. In `download` and `local` modes browsers contact only Gitea (and the gallery,
-  if enabled).
-- **Availability**: `cdn` mode depends on Microsoft's CDN being reachable; the other modes depend only on Gitea.
-- **Extension isolation and network restriction**: in `cdn` mode the extension host runs on a
-  `*.vscode-cdn.net` address, so extensions do not share the Gitea web session; but Microsoft's page allows
-  extensions to connect to any `https:` host, so `--connect-src` does not apply. In `download` and `local`
-  modes extensions run on the Gitea origin and can use the user's Gitea web session, but can connect only to
-  Gitea, the gallery and `--connect-src` hosts. See [Security model](#security-model).
-- **Chromium on intranets**: in `cdn` mode Chromium may ask users for permission to access the local network,
-  because a public page (the CDN extension host) calls an intranet Gitea.
-
-For `cdn` mode, add this to Gitea's `app.ini` and restart Gitea. It lets the extension host on
-`*.vscode-cdn.net` load the extension from Gitea and call Gitea's API with the user's token (no cookies):
-
-```ini
-[cors]
-ENABLED = true
-ALLOW_DOMAIN = https://*.vscode-cdn.net
-METHODS = GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS
-HEADERS = Content-Type,User-Agent,Authorization
-ALLOW_CREDENTIALS = false
-```
-
-WebKit (Safari) blocks requests from the HTTPS extension host to an `http` Gitea, so `cdn` mode requires an
-`https` `ROOT_URL`.
+Browsers cannot load the workbench from Microsoft's CDN (`main.vscode-cdn.net`): it sends CORS headers only to
+Microsoft's own sites, such as `vscode.dev` and `github.dev`, so a Gitea page's module scripts from it are
+blocked. The installer refuses `--workbench=cdn`.
 
 ### 3. Register the OAuth application (optional)
 
@@ -202,16 +180,15 @@ sh dist/gitea-dev/install.sh GITEA_CUSTOM [ROOT_URL] [OPTIONS]   # release built
 
 Run it as the user that owns `GITEA_CUSTOM`. Before writing anything, the installer checks every argument, the
 custom directory, Gitea's `app.ini` (`GITEA_CUSTOM/conf/app.ini`, or `--app-ini`), the workbench archive, and,
-when Gitea answers at `ROOT_URL`, that it is Gitea with that `ROOT_URL`, that `[cors]` admits the CDN in `cdn`
-mode, and that the OAuth application exists, is public and has the redirect URI. It prints every problem it
+when Gitea answers at `ROOT_URL`, that it is Gitea with that `ROOT_URL` and that the OAuth application exists,
+is public and has the redirect URI. It prints every problem it
 finds, one line each with the value found and the value expected, and changes nothing. When Gitea does not answer
 (for example before its first start), it notes which checks it skipped and goes on.
 
 It then writes:
 
 - `GITEA_CUSTOM/public/assets/gitea-dev/`: the start page, the service worker, `configuration.json` with your
-  settings, and a versioned directory with the editor, its extension and, in `download` and `local` modes, the
-  workbench. Gitea serves these at `<ROOT_URL>/assets/gitea-dev/`.
+  settings, and a versioned directory with the editor, its extension and the workbench. Gitea serves these at `<ROOT_URL>/assets/gitea-dev/`.
 - `GITEA_CUSTOM/templates/custom/extra_tabs.tmpl`: the template that adds the **Web IDE** tab to repository
   pages, and `public/assets/gitea-dev/shortcut.js`, the `.` key handler. The installer never overwrites a
   different existing copy of either; merge your changes and rerun.
@@ -219,11 +196,8 @@ It then writes:
 Examples:
 
 ```sh
-# CDN workbench, OAuth sign-in
+# Workbench downloaded once and served by Gitea, OAuth sign-in
 sh gitea-dev/install.sh /var/lib/gitea/custom https://git.example.com/ --oauth-client-id=CLIENT_ID
-
-# Workbench downloaded once and served by Gitea
-sh gitea-dev/install.sh /var/lib/gitea/custom https://git.example.com/ --workbench=download --oauth-client-id=CLIENT_ID
 
 # Air-gapped: archive copied in, no gallery
 sh gitea-dev/install.sh /var/lib/gitea/custom https://git.example.com/ --workbench=local \
@@ -294,23 +268,21 @@ want; do not edit the installed files.
 | Argument | Default | What it does | When to use it |
 | --- | --- | --- | --- |
 | `GITEA_CUSTOM` (first) | required | Gitea's custom directory, where the files are installed. It must exist, be writable, and be empty or hold Gitea's `conf`, `public`, `templates` or `options`. | Always. Find it with `gitea help` (`CustomPath`). |
-| `ROOT_URL` (second) | `[server] ROOT_URL` of the `app.ini` | Gitea's public address, equal to `[server] ROOT_URL` in `app.ini`: `https://host[:port][/sub/path]`, or `http` on `localhost`, `127.0.0.1` or `[::1]`; lowercase host, plain path. Must be `https` with `--workbench=cdn`. | Leave it out when the `app.ini` is found (see `--app-ini`); the installer reads it and says which value it used. Pass it when `app.ini` has no literal `ROOT_URL`. |
-| `--workbench=cdn\|download\|local` | `cdn` | Where browsers get the workbench ([step 2](#2-choose-a-workbench-source)). | `download` or `local` to keep browsers from contacting Microsoft. |
+| `ROOT_URL` (second) | `[server] ROOT_URL` of the `app.ini` | Gitea's public address, equal to `[server] ROOT_URL` in `app.ini`: `https://host[:port][/sub/path]`, or `http` on `localhost`, `127.0.0.1` or `[::1]`; lowercase host, plain path. | Leave it out when the `app.ini` is found (see `--app-ini`); the installer reads it and says which value it used. Pass it when `app.ini` has no literal `ROOT_URL`. |
+| `--workbench=download\|local` | `download` | Where the installer gets the workbench ([step 2](#2-choose-a-workbench-source)). | `local` when the install host cannot reach the internet. |
 | `--workbench-archive=PATH` | none | The workbench archive file; it must match the SHA-256 pinned in `workbench.json`. Required by `--workbench=local`, refused otherwise. | Air-gapped installs. |
 | `--oauth-client-id=ID` | none | Enables **Sign In with OAuth** with this OAuth application ([step 3](#3-register-the-oauth-application-optional)): 1-128 letters, digits or hyphens. | When you registered the application in the administrator UI (recommended). Without an OAuth application users sign in with a personal access token. |
 | `--create-oauth-app` | off | Finds or creates the public OAuth application `Gitea Web IDE` with the personal access token in the environment variable `GITEA_TOKEN`, and installs its Client ID. The application belongs to the token's user, not the instance. Refused with `--oauth-client-id`. | Only when the administrator UI is not an option ([step 3, B](#b-let-the-installer-create-it)). |
 | `--gallery=URL\|off` | `https://open-vsx.org` | The extension gallery the Extensions view uses, which browsers contact directly. `off` disables installing extensions. | `off` on air-gapped sites or to forbid extensions; a URL for a private Open VSX instance. |
 | `--extensions-allowlist="publisher.name ..."` | all | Only these gallery extensions are listed and downloadable. Ids are lowercased, separated by spaces, tabs, newlines or commas; an empty list is refused. | To limit extensions. Enforced by the browser, so not a security boundary ([Security model](#security-model)). |
-| `--connect-src="SOURCE ..."` | none | Extra hosts extensions may connect to: `https://host[:port][/path]`, `wss://`, or loopback `http://`/`ws://`; a leading `*.` needs two more labels. Refused with `cdn`, where Microsoft's extension host page allows any `https:` host. | `download` or `local`, when an extension needs a service. |
-| `--webviews=disabled\|vscode-cdn` | `vscode-cdn` with `cdn`, else `disabled` | Webviews are the panels extensions draw with HTML (Markdown preview, extension pages). `vscode-cdn` hosts them on Microsoft's `https://*.vscode-cdn.net`; `disabled` shows a page saying they are unavailable. | `vscode-cdn` with `download` or `local` if you accept that browsers contact Microsoft for webviews. |
-| `--app-ini=PATH` | `GITEA_CUSTOM/conf/app.ini` if present | The `app.ini` Gitea runs with, for the installer's checks of `ROOT_URL` and `[cors]`; the installer never changes it. | When Gitea's configuration is elsewhere (`ConfigFile` in `gitea help`, for example `/etc/gitea/app.ini`). |
+| `--connect-src="SOURCE ..."` | none | Extra hosts extensions may connect to: `https://host[:port][/path]`, `wss://`, or loopback `http://`/`ws://`; a leading `*.` needs two more labels. | When an extension needs a service. |
+| `--webviews=disabled\|vscode-cdn` | `disabled` | Webviews are the panels extensions draw with HTML (Markdown preview, extension pages). `vscode-cdn` hosts them on Microsoft's `https://*.vscode-cdn.net`; `disabled` shows a page saying they are unavailable. | `vscode-cdn` if you accept that browsers contact Microsoft for webviews. |
+| `--app-ini=PATH` | `GITEA_CUSTOM/conf/app.ini` if present | The `app.ini` Gitea runs with, for the installer's check of `ROOT_URL`; the installer never changes it. | When Gitea's configuration is elsewhere (`ConfigFile` in `gitea help`, for example `/etc/gitea/app.ini`). |
 
 Webviews in detail: they always run on their own `*.vscode-cdn.net` origin, with no access to the Gitea page,
-its cookies or the editor's stored secrets (`tests/browser/webviews.spec.ts`). With `download` and `local`, the
-built-in Markdown preview opens but stays empty, because its styles and scripts come from Gitea, whose static
-files lack the `Cross-Origin-Resource-Policy` header the webview page requires; webviews with inline content
-work. With `cdn` those files come from the CDN, and the preview renders in Chromium and WebKit; in Firefox it
-appeared empty in testing.
+its cookies or the editor's stored secrets (`tests/browser/webviews.spec.ts`). The built-in Markdown preview
+opens but stays empty, because its styles and scripts come from Gitea, whose static files lack the
+`Cross-Origin-Resource-Policy` header the webview page requires; webviews with inline content work.
 
 ### `configuration.json`
 
@@ -321,13 +293,12 @@ editing it.
 | Field | Meaning |
 | --- | --- |
 | `instance` | `ROOT_URL` without the trailing slash; editor links must point to this origin and sub-path |
-| `version` | Directory holding this release's editor, extension and, with `download` or `local`, the workbench |
+| `version` | Directory holding this release's editor, extension and workbench |
 | `oauthClientId` | `--oauth-client-id`, or `null` |
 | `gallery` | Gallery address, or `null` when disabled |
 | `extensionsAllowlist` | Lowercase `publisher.name` ids, or `null` for all |
 | `connectSrc` | `--connect-src`, space-separated |
 | `webviews` | `disabled` or `vscode-cdn` |
-| `workbench` | `https://main.vscode-cdn.net/stable/<commit>/` with `cdn`, else `null` (the workbench is under `version`) |
 | `testMode` | `false`; the browser test harness sets it |
 
 ### Editor settings
@@ -350,18 +321,16 @@ Set in the editor's Settings UI or `settings.json` (`packages/gitea-vscode-web/p
 ## Security model
 
 **Extensions are trusted code**, as in desktop VS Code: install only extensions you trust. Opening a repository
-cannot install an extension (workspace recommendations are disabled). What an extension can reach depends on
-the workbench mode:
+cannot install an extension (workspace recommendations are disabled). What an extension can reach:
 
-| | `download`, `local` | `cdn` |
-| --- | --- | --- |
-| Where extensions run | On the Gitea origin, in a frame served by Gitea | On `https://<id>.vscode-cdn.net`, in Microsoft's extension host page |
-| Gitea web session | Usable: an extension can load Gitea pages with the user's session cookie, CSRF token included, so an extension in an administrator's editor can use site administration | Not usable: requests to Gitea carry no cookies |
-| Stored personal access token | An extension can decrypt it from the editor's browser storage | Not tested |
-| Extension network access | Only Gitea, the gallery and `--connect-src` hosts (CSP) | Any `https:` or `wss:` host and loopback (Microsoft's page CSP) |
-| Microsoft at runtime | Not contacted (webviews excepted when `--webviews=vscode-cdn`) | Every load: workbench files, and the extension host page, whose address names the Gitea origin |
+- **Where extensions run**: on the Gitea origin, in a frame served by Gitea.
+- **Gitea web session**: usable. An extension can load Gitea pages with the user's session cookie, CSRF token
+  included, so an extension in an administrator's editor can use site administration.
+- **Stored personal access token**: an extension can decrypt it from the editor's browser storage.
+- **Network access**: only Gitea, the gallery and `--connect-src` hosts (CSP).
+- **Microsoft at runtime**: not contacted, except for webviews with `--webviews=vscode-cdn`.
 
-In every mode, all extensions share one extension host with the editor's own extension, which holds the user's
+All extensions share one extension host with the editor's own extension, which holds the user's
 Gitea token, and any extension can ask it for a Gitea session (the `gitea` authentication provider, used by
 Settings Sync).
 
@@ -380,7 +349,7 @@ Settings Sync).
   commit.
 - **Isolation**: the editor page is cross-origin isolated, with a restrictive Content Security Policy set by the
   editor's service worker. Only the extension host frame allows `'unsafe-eval'`, which the workbench's extension
-  loader needs; in `cdn` mode that frame is Microsoft's page with Microsoft's policy.
+  loader needs.
 
 Design and requirements: [plan.md](plan.md). A session bridge (sign-in from the Gitea session, no token in the
 browser) would need a Gitea backend patch and is not built: [docs/session-bridge.md](docs/session-bridge.md).
@@ -450,12 +419,11 @@ npm run assets -- rollback FULL_INSTALLED_COMMIT
 npm run assets -- prune
 ```
 
-Design notes on the cache and locks are in [plan.md](plan.md#workbench-assets). `BROWSER_WORKBENCH=cdn` runs the
-browser suite in `cdn` mode, which needs internet ([docs/testing.md](docs/testing.md#cdn-mode)).
+Design notes on the cache and locks are in [plan.md](plan.md#workbench-assets).
 
 **Local Gitea instance.** The local installation runs Gitea 28.2.0 with SQLite at `http://localhost:3000`, serving
-the editor itself in `cdn` mode (browsers load the workbench from Microsoft's CDN, so the machine needs internet;
-`[cors]` is enabled in its `app.ini`), with the OAuth application registered automatically and the demo repositories
+the editor itself with the workbench from the local download cache (`npm run assets -- warm`), or downloaded
+when the cache is empty, with the OAuth application registered automatically and the demo repositories
 `web-ide-demo` (public) and `private-demo`, owned by the administrator:
 
 ```sh
@@ -479,5 +447,4 @@ The Gitea client library is described in [packages/gitea-repository/README.md](p
 just-bash (Apache-2.0) and the packages its browser bundle inlines, are credited with their license texts in the
 release's `THIRD_PARTY_NOTICES.txt`; [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) covers the Microsoft typings
 in this repository. The VS Code web workbench is Microsoft's, under the terms in
-the `LICENSE` file of its archive: in `download` and `local` modes the installer installs it into
-`$GITEA_CUSTOM`, and in `cdn` mode browsers load it from Microsoft.
+the `LICENSE` file of its archive; the installer installs it into `$GITEA_CUSTOM`.

@@ -6,7 +6,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import { startGitea, type GiteaFixture } from '../helpers/gitea.js';
 import { allowlist, createGalleryServer } from '../helpers/gallery.js';
-import { browserGiteaIni, browserWorkbench } from '../helpers/workbench.js';
+import { browserWorkbench } from '../helpers/workbench.js';
 // @ts-ignore untyped .mjs module
 import { install } from '../../scripts/run-installer.mjs';
 import { command, withoutTrustPrompt } from './fixtures.js';
@@ -33,7 +33,7 @@ test.beforeAll(async () => {
   galleryOrigin = `http://127.0.0.1:${galleryPort}`;
   options = { gallery: galleryOrigin, testMode: true, ...browserWorkbench };
   gitea = await startGitea({
-    users: [{ name: 'owner', tokens: { full: ['all'] } }], extraIni: browserGiteaIni,
+    users: [{ name: 'owner', tokens: { full: ['all'] } }],
     custom: custom => install({ ...options, extensionsAllowlist: allowlist.join(' '), rootUrl: 'http://127.0.0.1:9', custom }),
   });
   await gitea.createRepo('owner', 'allow-fixture');

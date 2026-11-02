@@ -14,7 +14,6 @@ import { c as createTar } from 'tar';
 
 const VERSION = 'abc123abc123-def456def456';
 const COMMIT = 'abc123abc123'.padEnd(40, '0');
-const CDN_ROOT = `https://main.vscode-cdn.net/stable/${COMMIT}/`;
 const IFRAME = 'workbench/out/vs/workbench/services/extensions/worker/webWorkerExtensionHostIframe.html';
 const CALLBACK = 'workbench/out/vs/code/browser/workbench/callback.html';
 const shellArgs = (shell: string) => shell === 'busybox' ? ['sh'] : [];
@@ -46,20 +45,26 @@ const ARCHIVE = join(fixtureDir, 'vscode-web.tar.gz');
 await createTar({ gzip: true, file: ARCHIVE, cwd: fixtureDir, portable: true }, ['vscode-web']);
 const ARCHIVE_SHA256 = createHash('sha256').update(await readFile(ARCHIVE)).digest('hex');
 const LOCAL = ['--workbench=local', `--workbench-archive=${ARCHIVE}`];
+// The default pin URL: serves the archive, so installs in the default download mode run offline.
+// spawnSync blocks this server, so synchronous runs pass LOCAL.
+const archiveServer = createServer((_req, res) => { void readFile(ARCHIVE).then(bytes => res.end(bytes)); });
+await new Promise<void>(resolve => archiveServer.listen(0, '127.0.0.1', resolve));
+archiveServer.unref();
+const ARCHIVE_URL = `http://127.0.0.1:${(archiveServer.address() as AddressInfo).port}/vscode-web.tar.gz`;
 
 interface ReleaseOptions { versionFile?: string; omitVersionDir?: boolean; pin?: Record<string, string> }
 
 async function release({ versionFile = `${VERSION}\n`, omitVersionDir = false, pin = {} }: ReleaseOptions = {}) {
   const root = await mkdtemp(join(tmpdir(), 'gitea-dev-release-'));
   const assets = join(root, 'custom/public/assets/gitea-dev');
-  const pinJson = { version: '1.2.3', commit: COMMIT, url: 'https://example.com/vscode-web.tar.gz', sha256: ARCHIVE_SHA256, ...pin };
+  const pinJson = { version: '1.2.3', commit: COMMIT, url: ARCHIVE_URL, sha256: ARCHIVE_SHA256, ...pin };
   const files: Record<string, string> = {
     VERSION: versionFile,
     'workbench.json': `${JSON.stringify(pinJson, null, 2)}\n`,
     'custom/templates/custom/extra_tabs.tmpl': '<a data-gitea-dev-launch></a>\n',
     [`custom/public/assets/gitea-dev/${VERSION}/bootstrap.js`]: 'export {};\n',
-    'custom/public/assets/gitea-dev/index.html': `<meta content="script-src 'self'@WORKBENCH_SOURCES@; img-src 'self'@GALLERY_SOURCES@; frame-src 'self'@FRAME_SOURCES@">\n`,
-    'custom/public/assets/gitea-dev/oauth-callback.html': `<meta content="connect-src 'self'@WORKBENCH_SOURCES@@GALLERY_SOURCES@">\n`,
+    'custom/public/assets/gitea-dev/index.html': `<meta content="script-src 'self'; img-src 'self'@GALLERY_SOURCES@; frame-src 'self'@FRAME_SOURCES@">\n`,
+    'custom/public/assets/gitea-dev/oauth-callback.html': `<meta content="connect-src 'self'@GALLERY_SOURCES@">\n`,
     'custom/public/assets/gitea-dev/coi-sw.js': 'var config = "@CONFIG@";\nvar sources = "@GALLERY_SOURCES@";\nvar hashes = "@SCRIPT_HASHES@";\n',
     'custom/public/assets/gitea-dev/start.js': 'start();\n',
     'custom/public/assets/gitea-dev/shortcut.js': 'shortcut();\n',
@@ -139,7 +144,7 @@ test('every shell writes identical trees with substituted CSP sources and config
   assert.deepEqual(config, {
     instance: 'https://git.example.com/git', version: VERSION, oauthClientId: 'd22e588f-d1bd-42af-84ef-7f888fa2d355',
     gallery: 'https://open-vsx.org', extensionsAllowlist: ['esbenp.prettier-vscode', 'redhat.vscode-yaml'],
-    connectSrc: 'https://api.example.com wss://*.example.com:443 http://localhost:*', webviews: 'vscode-cdn', workbench: null, testMode: false,
+    connectSrc: 'https://api.example.com wss://*.example.com:443 http://localhost:*', webviews: 'vscode-cdn', testMode: false,
   });
   const hashes = { [CALLBACK]: CALLBACK_SCRIPTS.map(cspHash).join(' '), [IFRAME]: cspHash(IFRAME_SCRIPT) };
   assert.equal(files[`${assets}/coi-sw.js`],
@@ -163,27 +168,26 @@ test('defaults: gallery on at Open VSX, webviews disabled, no extra sources, no 
     for (const other of others) assert.deepEqual(other.files, first.files, `${other.kind} ${args.join(' ')}`);
     const config = JSON.parse(first.files['public/assets/gitea-dev/configuration.json']);
     assert.deepEqual(config, { instance: 'http://127.0.0.1:9', version: VERSION, oauthClientId: null, gallery,
-      extensionsAllowlist: null, connectSrc: '', webviews: 'disabled', workbench: null, testMode: false });
+      extensionsAllowlist: null, connectSrc: '', webviews: 'disabled', testMode: false });
     assert.match(first.files[`public/assets/gitea-dev/${VERSION}/${IFRAME}`], new RegExp(`connect-src 'self'${sources.replace(/\./g, '\\.')}; script-src`));
     assert.equal(first.files['public/assets/gitea-dev/index.html'], `<meta content="script-src 'self'; img-src 'self'${sources}; frame-src 'self'">\n`);
   }
 });
 
-test('the default workbench mode is cdn: nothing from Microsoft is installed and the page CSP allows the pinned CDN build', async () => {
-  for (const [args, frames] of [[[], ' https://*.vscode-cdn.net'], [['--webviews=vscode-cdn', '--workbench=cdn'], ' https://*.vscode-cdn.net']] as const) {
-    const [first, ...others] = await installAll(['https://git.example.com', ...args]);
-    assert.equal(first.status, 0, first.stderr);
-    for (const other of others) assert.deepEqual(other.files, first.files, `${other.kind} ${args.join(' ')}`);
-    const assets = 'public/assets/gitea-dev';
-    const config = JSON.parse(first.files[`${assets}/configuration.json`]);
-    assert.equal(config.workbench, CDN_ROOT);
-    assert.ok(!Object.keys(first.files).some(path => path.startsWith(`${assets}/${VERSION}/workbench/`)), 'no workbench files');
-    assert.equal(first.files[`${assets}/index.html`],
-      `<meta content="script-src 'self' https://main.vscode-cdn.net; img-src 'self' https://open-vsx.org https://openvsx.eclipsecontent.org; frame-src 'self'${frames}">\n`);
-    assert.equal(first.files[`${assets}/oauth-callback.html`],
-      `<meta content="connect-src 'self' https://main.vscode-cdn.net https://open-vsx.org https://openvsx.eclipsecontent.org">\n`);
-    assert.match(first.files[`${assets}/coi-sw.js`], /var hashes = \{\};/);
+test('the default workbench mode is download; cdn is refused, because the CDN sends no CORS headers to a Gitea origin', async () => {
+  const [first, ...others] = await installAll(['https://git.example.com']);
+  assert.equal(first!.status, 0, first!.stderr);
+  for (const other of others) assert.deepEqual(other.files, first!.files, other.kind);
+  const assets = 'public/assets/gitea-dev';
+  assert.ok(`${assets}/${VERSION}/${IFRAME}` in first!.files, 'the workbench is installed');
+  assert.equal(first!.files[`${assets}/oauth-callback.html`], `<meta content="connect-src 'self' https://open-vsx.org https://openvsx.eclipsecontent.org">\n`);
+  const refused = await installAll(['https://git.example.com', '--workbench=cdn']);
+  sameOutput(refused);
+  for (const result of refused) {
+    assert.notEqual(result.status, 0, result.kind);
+    assert.deepEqual(result.files, {}, result.kind);
   }
+  assert.ok(refused[0]!.stderr.split('\n').includes('--workbench: got "cdn"; the CDN refuses cross-origin loads from Gitea; use download or local.'), refused[0]!.stderr);
 });
 
 test('download and local modes install the pinned workbench without its Node-only parts', async () => {
@@ -280,12 +284,12 @@ test('existing differing templates are refused; reinstalling is idempotent', asy
     for (const kind of shells) {
       const custom = join(root, `again-${kind}`);
       await mkdir(custom);
-      assert.equal(run(kind, root, custom, ['https://git.example.com']).status, 0);
+      assert.equal(run(kind, root, custom, ['https://git.example.com', ...LOCAL]).status, 0);
       const first = await tree(custom);
       const second = run(kind, root, custom, ['https://git.example.com', '--webviews=vscode-cdn', ...LOCAL]);
       assert.equal(second.status, 0, second.stderr);
       const after = await tree(custom);
-      assert.deepEqual(Object.keys(after).filter(path => !path.includes('/workbench/')).sort(), Object.keys(first).sort(), kind);
+      assert.deepEqual(Object.keys(after).sort(), Object.keys(first).sort(), kind);
       assert.match(after['public/assets/gitea-dev/configuration.json'], /"webviews":"vscode-cdn"/);
     }
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -331,9 +335,9 @@ test('F8: reinstalling over a live version directory replaces it and leaves no a
     for (const kind of shells) {
       const custom = join(root, `swap-${kind}`);
       await mkdir(custom);
-      assert.equal(run(kind, root, custom, ['https://git.example.com']).status, 0);
+      assert.equal(run(kind, root, custom, ['https://git.example.com', ...LOCAL]).status, 0);
       await writeFile(join(custom, `public/assets/gitea-dev/${VERSION}/stale.txt`), 'stale\n');
-      assert.equal(run(kind, root, custom, ['https://git.example.com', '--gallery=off']).status, 0);
+      assert.equal(run(kind, root, custom, ['https://git.example.com', '--gallery=off', ...LOCAL]).status, 0);
       const after = await tree(custom);
       assert.ok(!(`public/assets/gitea-dev/${VERSION}/stale.txt` in after), kind);
       assert.ok(!Object.keys(after).some(path => /(\.tmp|\.old|\.sub)$|\.partial/.test(path)), kind);
@@ -351,7 +355,6 @@ const appIni = (text: string) => async (custom: string) => {
   await mkdir(join(custom, 'conf'), { recursive: true });
   await writeFile(join(custom, 'conf/app.ini'), text);
 };
-const CORS_OK = '[cors]\nENABLED = true\nALLOW_DOMAIN = https://*.vscode-cdn.net\nHEADERS = Content-Type,User-Agent,Authorization\n';
 
 test('every problem is reported, one line each, identically under every shell', async () => {
   const results = await installAll(['https://git.example.com', '--bogus=1', '--webviews=maybe', '--workbench=bundled', '--connect-src=*', '--gallery=ftp://x', '--app-ini']);
@@ -360,27 +363,23 @@ test('every problem is reported, one line each, identically under every shell', 
   for (const expected of [
     '--bogus: unknown option; expected one of --oauth-client-id, --webviews, --connect-src, --extensions-allowlist, --gallery, --workbench, --workbench-archive, --app-ini.',
     '--app-ini: needs a value; write --app-ini=VALUE.',
-    '--workbench: got "bundled"; expected cdn, download or local.',
+    '--workbench: got "bundled"; expected download or local.',
     '--webviews: got "maybe"; expected disabled or vscode-cdn.',
     '--connect-src: source "*" not allowed; expected https://host or wss://host (a leading *. needs two more labels) or loopback http:// or ws://; no *, bare schemes, keywords, data: or blob:.',
     '--gallery: got "ftp://x"; expected off, or an https URL, or http on localhost, 127.0.0.1 or [::1], with a lowercase host and a plain path.',
   ]) assert.ok(lines.includes(expected), `missing: ${expected}\n${results[0]!.stderr}`);
-  assert.ok(lines.indexOf('--bogus: unknown option; expected one of --oauth-client-id, --webviews, --connect-src, --extensions-allowlist, --gallery, --workbench, --workbench-archive, --app-ini.') < lines.indexOf('--workbench: got "bundled"; expected cdn, download or local.'));
+  assert.ok(lines.indexOf('--bogus: unknown option; expected one of --oauth-client-id, --webviews, --connect-src, --extensions-allowlist, --gallery, --workbench, --workbench-archive, --app-ini.') < lines.indexOf('--workbench: got "bundled"; expected download or local.'));
   assert.match(results[0]!.stderr, /^Usage: install GITEA_CUSTOM \[ROOT_URL\]/m);
   for (const result of results) assert.deepEqual(result.files, {}, result.kind);
 });
 
 test('an option that does not apply to the chosen mode is refused', async () => {
-  for (const mode of ['cdn', 'download']) {
-    const results = await installAll(['https://git.example.com', `--workbench=${mode}`, `--workbench-archive=${ARCHIVE}`]);
+  for (const args of [[`--workbench-archive=${ARCHIVE}`], ['--workbench=download', `--workbench-archive=${ARCHIVE}`]]) {
+    const results = await installAll(['https://git.example.com', ...args]);
     sameOutput(results);
     assert.notEqual(results[0]!.status, 0);
     assert.ok(results[0]!.stderr.includes(`--workbench-archive: got "${ARCHIVE}"; applies only to --workbench=local; remove it or add --workbench=local.`), results[0]!.stderr);
   }
-  const connect = await installAll(['https://git.example.com', '--connect-src=https://api.example.com']);
-  sameOutput(connect);
-  assert.notEqual(connect[0]!.status, 0);
-  assert.ok(connect[0]!.stderr.includes('--connect-src: got "https://api.example.com"; applies only to --workbench=download or local, because in cdn mode Microsoft\'s extension host page allows any https: host; remove it.'), connect[0]!.stderr);
   const results = await installAll(['https://git.example.com', '--workbench=local']);
   sameOutput(results);
   assert.ok(results[0]!.stderr.includes('--workbench=local: needs --workbench-archive=PATH, the pinned workbench archive.'));
@@ -466,41 +465,7 @@ test('ROOT_URL, when left out, is [server] ROOT_URL of the app.ini found in GITE
   for (const result of given) assert.equal(result.status, 0, `${result.kind}: ${result.stderr}`);
 });
 
-test('--workbench=cdn needs [cors] in app.ini allowing the CDN origin, and prints the lines to add', async () => {
-  const refused = await installAll(['https://git.example.com'], appIni('[server]\nROOT_URL = https://git.example.com/\n'));
-  sameOutput(refused);
-  assert.notEqual(refused[0]!.status, 0);
-  const stderr = refused[0]!.stderr;
-  assert.match(stderr, /^\/.*\/conf\/app\.ini \[cors\] ENABLED: got ""; --workbench=cdn needs true\.$/m);
-  assert.match(stderr, /^Add to Gitea's app\.ini \(\/.*\/conf\/app\.ini\) and restart Gitea:\n\[cors\]\nENABLED = true\nALLOW_DOMAIN = https:\/\/\*\.vscode-cdn\.net\nMETHODS = GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS\nHEADERS = Content-Type,User-Agent,Authorization\nALLOW_CREDENTIALS = false$/m);
-  for (const [cors, expected] of [
-    ['[cors]\nENABLED = true\nALLOW_DOMAIN = https://example.com, https://*.example.org\n', /\[cors\] ALLOW_DOMAIN: got "https:\/\/example\.com, https:\/\/\*\.example\.org"; expected it to allow https:\/\/\*\.vscode-cdn\.net\./],
-    ['[cors]\nENABLED = true\nHEADERS = Authorization\n', /\[cors\] HEADERS: got "Authorization"; expected it to include Content-Type\./],
-  ] as const) {
-    const results = await installAll(['https://git.example.com'], appIni(`[server]\nROOT_URL = https://git.example.com/\n${cors}`));
-    sameOutput(results);
-    assert.notEqual(results[0]!.status, 0);
-    assert.match(results[0]!.stderr, expected);
-  }
-  for (const cors of [CORS_OK, '[cors]\nENABLED = On\n', '[cors]\nENABLED = 1\nALLOW_DOMAIN = *\n', '[cors]\nENABLED = true\nALLOW_DOMAIN = https://v--*.vscode-cdn.net\nHEADERS = *\n']) {
-    for (const result of await installAll(['https://git.example.com'], appIni(`[server]\nROOT_URL = https://git.example.com/\n${cors}`))) {
-      assert.equal(result.status, 0, `${result.kind} ${cors}: ${result.stderr}`);
-    }
-  }
-  // download and local do not need CORS.
-  for (const result of await installAll(['https://git.example.com', ...LOCAL], appIni('[server]\nROOT_URL = https://git.example.com/\n'))) {
-    assert.equal(result.status, 0, `${result.kind}: ${result.stderr}`);
-  }
-});
-
-test('--workbench=cdn needs an https ROOT_URL', async () => {
-  const results = await installAll(['http://127.0.0.1:9']);
-  sameOutput(results);
-  assert.ok(results[0]!.stderr.includes('ROOT_URL: got "http://127.0.0.1:9"; --workbench=cdn needs https, because WebKit blocks an http Gitea from the CDN extension host; serve Gitea over HTTPS or use --workbench=download.'));
-  for (const result of results) assert.notEqual(result.status, 0, result.kind);
-});
-
-test('--test-mode, left out of the usage text, writes the test hook flag and lets cdn use an http loopback ROOT_URL', async () => {
+test('--test-mode, left out of the usage text, writes the test hook flag', async () => {
   const [first, ...others] = await installAll(['http://127.0.0.1:9', '--test-mode']);
   assert.equal(first!.status, 0, first!.stderr);
   for (const other of others) assert.deepEqual(other.files, first!.files, other.kind);
@@ -522,9 +487,9 @@ test('an unreadable --workbench-archive is refused', { skip: process.getuid?.() 
   assert.ok(results[0]!.stderr.includes(`--workbench-archive: got "${locked}"; not a readable file; pass the archive from the url in the release's workbench.json.`));
 });
 
-test('--webviews follows the workbench mode unless given', async () => {
+test('--webviews is disabled unless given', async () => {
   for (const [args, webviews] of [
-    [[], 'vscode-cdn'], [['--webviews=disabled'], 'disabled'], [LOCAL, 'disabled'], [[...LOCAL, '--webviews=vscode-cdn'], 'vscode-cdn'],
+    [[], 'disabled'], [['--webviews=vscode-cdn'], 'vscode-cdn'], [LOCAL, 'disabled'], [[...LOCAL, '--webviews=vscode-cdn'], 'vscode-cdn'],
   ] as const) {
     const results = await installAll(['https://git.example.com', ...args]);
     for (const result of results) {
@@ -537,10 +502,10 @@ test('--webviews follows the workbench mode unless given', async () => {
 
 const FAKE_CLIENT = '6f3c2a1e-0b0d-4c55-9a37-5d1c9e8f7a10';
 // A stand-in for Gitea 1.24.6 over HTTPS, answering as the real one does (version JSON, appUrl in pages,
-// CORS from [cors], and the OAuth token endpoint's errors for an invalid code).
+// and the OAuth token endpoint's errors for an invalid code).
 interface AppRequest { method: string; authorization?: string; body: string }
 async function fakeGitea(behavior: {
-  gitea?: boolean; gateway?: boolean; appUrl?: string; cors?: boolean; clients?: Record<string, 'public' | 'confidential' | 'elsewhere'>;
+  gitea?: boolean; gateway?: boolean; appUrl?: string; clients?: Record<string, 'public' | 'confidential' | 'elsewhere'>;
   /** The token the user API accepts, the applications it lists, and the requests it received. */
   token?: string; apps?: Record<string, unknown>[]; requests?: AppRequest[];
   /** Gitea before 1.23 and Forgejo: the application API has no skip_secondary_authorization field. */
@@ -552,17 +517,10 @@ async function fakeGitea(behavior: {
   assert.equal(made.status, 0, 'openssl');
   let base = '';
   const server = createHttpsServer({ key: await readFile(join(dir, 'key.pem')), cert: await readFile(join(dir, 'cert.pem')) }, (req, res) => {
-    const origin = req.headers.origin;
-    const allow = behavior.cors && typeof origin === 'string' && origin.endsWith('.vscode-cdn.net');
-    if (allow) res.setHeader('Access-Control-Allow-Origin', origin);
     const path = new URL(req.url ?? '/', base).pathname;
     if (behavior.gitea === false) { res.statusCode = 404; res.end('not found'); return; }
     if (behavior.gateway) { res.statusCode = 502; res.end('Bad Gateway'); return; }
-    if (req.method === 'OPTIONS') {
-      if (!allow) { res.statusCode = 405; res.end(); return; }
-      res.setHeader('Access-Control-Allow-Headers', 'Authorization');
-      res.end();
-    } else if (path === '/api/v1/version') res.end('{"version":"1.24.6"}');
+    if (path === '/api/v1/version') res.end('{"version":"1.24.6"}');
     else if (path === '/api/v1/user/applications/oauth2') {
       let body = '';
       req.on('data', chunk => { body += chunk; });
@@ -683,17 +641,16 @@ test('--create-oauth-app finds or creates the public OAuth application with GITE
   }
 });
 
-test('a running Gitea at ROOT_URL is checked: it is Gitea, its ROOT_URL, [cors] for cdn, and the OAuth application', { skip: spawnSync('openssl', ['version']).status !== 0 && 'needs openssl' }, async () => {
+test('a running Gitea at ROOT_URL is checked: it is Gitea, its ROOT_URL, and the OAuth application', { skip: spawnSync('openssl', ['version']).status !== 0 && 'needs openssl' }, async () => {
   const client = 'd22e588f-d1bd-42af-84ef-7f888fa2d355';
   const cases: [string, Parameters<typeof fakeGitea>[0], (base: string) => string[], string | RegExp | null][] = [
-    ['valid', { cors: true, clients: { [client]: 'public' } }, () => [`--oauth-client-id=${client}`], null],
+    ['valid', { clients: { [client]: 'public' } }, () => [`--oauth-client-id=${client}`], null],
     ['proxy without Gitea', { gateway: true }, () => [`--oauth-client-id=${client}`], null],
     ['not Gitea', { gitea: false }, () => [...LOCAL], /^ROOT_URL: got "https:\/\/127\.0\.0\.1:\d+"; https:\/\/127\.0\.0\.1:\d+\/api\/v1\/version answered HTTP 404 without a Gitea version; pass Gitea's ROOT_URL\.$/m],
     ['other ROOT_URL', { appUrl: 'https://git.example.com/' }, () => [...LOCAL], /^ROOT_URL: got "https:\/\/127\.0\.0\.1:\d+"; Gitea at that address reports ROOT_URL https:\/\/git\.example\.com\/; pass that URL\.$/m],
-    ['no CORS', { cors: false }, () => [], /^ROOT_URL: Gitea at https:\/\/127\.0\.0\.1:\d+ refused a CORS preflight from https:\/\/v--gitea-dev-install-check\.vscode-cdn\.net for its API with an Authorization header; --workbench=cdn needs \[cors\]\.$/m],
-    ['unknown client', { cors: true }, () => [`--oauth-client-id=${client}`], `--oauth-client-id: got "${client}"; Gitea has no OAuth application with this Client ID.`],
-    ['confidential client', { cors: true, clients: { [client]: 'confidential' } }, () => [`--oauth-client-id=${client}`], `--oauth-client-id: got "${client}"; the application is confidential; register a public one (confidential_client false).`],
-    ['other redirect', { cors: true, clients: { [client]: 'elsewhere' } }, () => [`--oauth-client-id=${client}`], /^--oauth-client-id: got "d22e588f-d1bd-42af-84ef-7f888fa2d355"; the application lacks the redirect URI https:\/\/127\.0\.0\.1:\d+\/assets\/gitea-dev\/oauth-callback\.html; add it\.$/m],
+    ['unknown client', {}, () => [`--oauth-client-id=${client}`], `--oauth-client-id: got "${client}"; Gitea has no OAuth application with this Client ID.`],
+    ['confidential client', { clients: { [client]: 'confidential' } }, () => [`--oauth-client-id=${client}`], `--oauth-client-id: got "${client}"; the application is confidential; register a public one (confidential_client false).`],
+    ['other redirect', { clients: { [client]: 'elsewhere' } }, () => [`--oauth-client-id=${client}`], /^--oauth-client-id: got "d22e588f-d1bd-42af-84ef-7f888fa2d355"; the application lacks the redirect URI https:\/\/127\.0\.0\.1:\d+\/assets\/gitea-dev\/oauth-callback\.html; add it\.$/m],
   ];
   for (const [name, behavior, args, expected] of cases) {
     const gitea = await fakeGitea(behavior);
@@ -708,9 +665,8 @@ test('a running Gitea at ROOT_URL is checked: it is Gitea, its ROOT_URL, [cors] 
           else assert.match(result.stderr, expected, `${result.kind} ${name}`);
         }
       }
-      if (name === 'no CORS') assert.match(results[0]!.stderr, /^Add to Gitea's app\.ini and restart Gitea:\n\[cors\]\n/m);
       if (name === 'valid') assert.doesNotMatch(results[0]!.stderr, /Note: Gitea/);
-      if (name === 'proxy without Gitea') assert.match(results[0]!.stderr, /^Note: https:\/\/127\.0\.0\.1:\d+\/api\/v1\/version answered HTTP 502, so Gitea is not running behind it; skipped the online checks of ROOT_URL, \[cors\] and --oauth-client-id\.$/m);
+      if (name === 'proxy without Gitea') assert.match(results[0]!.stderr, /^Note: https:\/\/127\.0\.0\.1:\d+\/api\/v1\/version answered HTTP 502, so Gitea is not running behind it; skipped the online checks of ROOT_URL and --oauth-client-id\.$/m);
     } finally { await gitea.close(); }
   }
   // Nothing answers: the online checks are skipped with a note and the install goes ahead.
@@ -718,6 +674,6 @@ test('a running Gitea at ROOT_URL is checked: it is Gitea, its ROOT_URL, [cors] 
   sameOutput(skipped);
   for (const result of skipped) {
     assert.equal(result.status, 0, `${result.kind}: ${result.stderr}`);
-    assert.ok(result.stderr.includes('Note: Gitea is not reachable at https://127.0.0.1:9/api/v1/version; skipped the online checks of ROOT_URL, [cors] and --oauth-client-id.'), result.stderr);
+    assert.ok(result.stderr.includes('Note: Gitea is not reachable at https://127.0.0.1:9/api/v1/version; skipped the online checks of ROOT_URL and --oauth-client-id.'), result.stderr);
   }
 });

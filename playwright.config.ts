@@ -19,9 +19,7 @@ const webkitEnv = existsSync(`${localWebKitLibraries}/libicudata.so.66`) ? {
 
 // Parallel workers; the server creates one Gitea account per worker slot (tests/browser/fixtures.ts).
 const workers = Number(process.env.BROWSER_WORKERS ?? 4);
-// Opt-in modes of tests/browser/server.ts. The CDN extension host (public origin) calls the
-// loopback Gitea, which Chromium allows only with local network access.
-const cdn = process.env.BROWSER_WORKBENCH === 'cdn';
+// Opt-in mode of tests/browser/server.ts.
 const tls = process.env.BROWSER_HTTPS === '1';
 
 export default defineConfig({
@@ -33,7 +31,7 @@ export default defineConfig({
   use: { baseURL: `${tls ? 'https' : 'http'}://127.0.0.1:8081`, trace: 'retain-on-failure', ignoreHTTPSErrors: tls },
   projects: [
     // Chromium registers no service worker on an origin with a certificate error, ignoreHTTPSErrors or not.
-    { name: 'chromium', use: { ...devices['Desktop Chrome'], ...(cdn ? { permissions: ['local-network-access'] } : {}),
+    { name: 'chromium', use: { ...devices['Desktop Chrome'],
       ...(tls ? { launchOptions: { args: ['--ignore-certificate-errors'] } } : {}) } },
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
     { name: 'webkit', use: { ...devices['Desktop Safari'], launchOptions: { env: webkitEnv } } },

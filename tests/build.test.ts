@@ -66,7 +66,7 @@ test('the release holds only our code and the pin; the build fetches no workbenc
 	const worker = await readFile(join(release, 'custom/public/assets/gitea-dev/coi-sw.js'), 'utf8');
 	assert.ok(worker.includes('"@SCRIPT_HASHES@"'));
 	const index = await readFile(join(release, 'custom/public/assets/gitea-dev/index.html'), 'utf8');
-	assert.match(index, /script-src 'self' 'wasm-unsafe-eval' blob:@WORKBENCH_SOURCES@;/);
+	assert.match(index, /script-src 'self' 'wasm-unsafe-eval' blob:;/);
 	assert.match(index, /frame-src 'self'@FRAME_SOURCES@;/);
 });
 

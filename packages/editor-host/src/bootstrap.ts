@@ -22,7 +22,7 @@ interface HostConfiguration {
 const deployment: DeploymentConfiguration = (globalThis as Record<string, any>)[CONFIGURATION_GLOBAL];
 const config: HostConfiguration = {
   launch: validateLaunch(new URL(location.href), deployment.instance),
-  assets: workbenchRoot(new URL('./', import.meta.url), deployment).href,
+  assets: workbenchRoot(new URL('./', import.meta.url)).href,
   extension: new URL('extension/', import.meta.url).href,
   testMode: deployment.testMode === true,
   extensionsGallery: deployment.gallery ? galleryProductConfiguration(deployment.gallery) : undefined,
@@ -35,21 +35,6 @@ Object.assign(globalThis, {
   _VSCODE_FILE_ROOT: new URL('out/', config.assets).href,
   _VSCODE_NLS_LANGUAGE: 'en',
 });
-// CDN workbench: its loader of node_modules packages (xterm and others) accepts only same-origin
-// script URLs unless this Trusted Types policy is supplied.
-if (deployment.workbench) {
-  const trustedTypes = (globalThis as { trustedTypes?: { createPolicy(name: string, rules: object): unknown } }).trustedTypes;
-  Object.assign(globalThis, {
-    _VSCODE_WEB_PACKAGE_TTP: trustedTypes?.createPolicy('giteaWorkbenchPackages', {
-      createScriptURL: (url: string) => {
-        if (url.startsWith(config.assets)) return url;
-        throw new Error(`Script URL outside the editor assets: ${url}`);
-      },
-    }),
-  });
-}
-// CDN workbench: the extension host iframe runs on https://<uuid>.vscode-cdn.net/<quality>/<commit>/.
-const [quality, commit] = deployment.workbench ? new URL(deployment.workbench).pathname.split('/').filter(Boolean) : [];
 await import(new URL(WORKBENCH_NLS, config.assets).href);
 const api = await import(new URL(WORKBENCH_MAIN, config.assets).href);
 const folderUri = api.URI.from({
@@ -122,8 +107,7 @@ api.create(document.body, {
     } : undefined,
     extensionEnabledApiProposals: { 'gitea.gitea-vscode-web': ['fileSearchProvider', 'textSearchProvider', 'scmActionButton', 'scmValidation'] },
     webEndpointUrl: undefined,
-    webEndpointUrlTemplate: deployment.workbench ? 'https://{{uuid}}.vscode-cdn.net/{{quality}}/{{commit}}' : undefined,
-    ...(deployment.workbench ? { quality, commit } : {}),
+    webEndpointUrlTemplate: undefined,
     webviewContentExternalBaseUrlTemplate: undefined,
     extensionRecommendations: {}, extensionTips: {},
     remoteExtensionTips: {}, virtualWorkspaceExtensionTips: {},

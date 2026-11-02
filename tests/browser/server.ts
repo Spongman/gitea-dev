@@ -1,14 +1,13 @@
 // Browser test deployment: a disposable Gitea serves the installed static editor itself on
 // BROWSER_PORT. A second origin serves the fixture gallery (CORS like Open VSX) and test controls.
-// The workbench mode comes from tests/helpers/workbench.ts; BROWSER_HTTPS=1 serves Gitea over HTTPS,
-// which WebKit needs for BROWSER_WORKBENCH=cdn.
+// The workbench comes from tests/helpers/workbench.ts; BROWSER_HTTPS=1 serves Gitea over HTTPS.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startGitea } from '../helpers/gitea.js';
 import { allowlist, createGalleryServer } from '../helpers/gallery.js';
-import { browserGiteaIni, browserWorkbench } from '../helpers/workbench.js';
+import { browserWorkbench } from '../helpers/workbench.js';
 // @ts-ignore untyped .mjs module
 import { install } from '../../scripts/run-installer.mjs';
 
@@ -36,7 +35,7 @@ function selfSigned() {
 if (tls) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const gitea = await startGitea({
   users: ['owner', ...slots].map(name => ({ name, tokens: { full: ['all'] } })), port, lfs: true,
-  https: tls ? selfSigned() : undefined, extraIni: browserGiteaIni,
+  https: tls ? selfSigned() : undefined,
   custom: custom => install({ ...options, custom }),
 });
 for (const user of ['owner', ...slots]) {
