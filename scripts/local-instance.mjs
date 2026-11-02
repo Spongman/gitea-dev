@@ -17,9 +17,14 @@ const binary = join(home, 'bin/gitea');
 const config = join(home, 'conf/app.ini');
 const stateFile = join(home, 'instance.json');
 const credentialsFile = join(home, 'credentials.json');
-const origin = 'http://localhost:3000';
 // Gitea serves the editor itself; no proxy or editor process.
 const giteaPort = 3000;
+// GITEA_DEV_HOST=name serves https://name:3000 with a self-signed certificate; the editor needs a secure context.
+const host = process.env.GITEA_DEV_HOST;
+const origin = host ? `https://${host}:${giteaPort}` : `http://localhost:${giteaPort}`;
+const local = `${host ? 'https' : 'http'}://127.0.0.1:${giteaPort}`;
+// This script's own requests to Gitea accept the self-signed certificate.
+if (host) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 // Name for a new administrator; an existing instance keeps the one in credentials.json.
 const defaultAdmin = 'admin';
 const pin = JSON.parse(await readFile(join(root, 'config/gitea-instance.json'), 'utf8'));
@@ -101,9 +106,14 @@ MODE = console
 LEVEL = Info
 `, { mode: 0o600, flag: 'wx' });
   }
+  if (host) await certificate();
   const ini = await readFile(config, 'utf8');
-  const listening = ini.replace(/^HTTP_PORT = .*$/m, `HTTP_PORT = ${giteaPort}`)
-    .replace(/^LOCAL_ROOT_URL = .*$/m, `LOCAL_ROOT_URL = http://127.0.0.1:${giteaPort}/`);
+  const tls = host ? `PROTOCOL = https\nCERT_FILE = ${home}/conf/cert.pem\nKEY_FILE = ${home}/conf/key.pem\n` : '';
+  const listening = ini.replace(/^(PROTOCOL|CERT_FILE|KEY_FILE) = .*\n/gm, '')
+    .replace(/^HTTP_PORT = .*\n/m, `HTTP_PORT = ${giteaPort}\n${tls}`)
+    .replace(/^DOMAIN = .*$/m, `DOMAIN = ${host ?? 'localhost'}`)
+    .replace(/^ROOT_URL = .*$/m, `ROOT_URL = ${origin}/`)
+    .replace(/^LOCAL_ROOT_URL = .*$/m, `LOCAL_ROOT_URL = ${local}/`);
   if (listening !== ini) await writeFile(config, listening, { mode: 0o600 });
   cli(['migrate'], 'database migration');
   let credentials = await readJson(credentialsFile).catch(error => {
@@ -119,6 +129,16 @@ LEVEL = Info
     await saveJson(credentialsFile, credentials);
   }
   return credentials;
+}
+
+/** A self-signed certificate for `host`, kept while it names that host. */
+async function certificate() {
+  const cert = join(home, 'conf/cert.pem');
+  const current = spawnSync('openssl', ['x509', '-noout', '-checkhost', host, '-checkend', '86400', '-in', cert], { encoding: 'utf8' });
+  if (current.status === 0 && current.stdout.includes('does match')) return;
+  const result = spawnSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-days', '30',
+    '-subj', `/CN=${host}`, '-addext', `subjectAltName=DNS:${host}`, '-keyout', join(home, 'conf/key.pem'), '-out', cert], { encoding: 'utf8' });
+  if (result.status !== 0) throw new Error(`openssl: ${result.stderr}`);
 }
 
 async function state() {
@@ -155,10 +175,10 @@ async function start() {
   closeSync(fd);
   gitea.unref();
   await saveJson(stateFile, { status: 'starting', pid: gitea.pid, url: origin, version: pin.version });
-  await healthy(`http://127.0.0.1:${giteaPort}/api/healthz`, gitea);
+  await healthy(`${local}/api/healthz`, gitea);
   const authorization = `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')}`;
   async function api(method, path, body) {
-    const response = await fetch(`http://127.0.0.1:${giteaPort}/api/v1${path}`, {
+    const response = await fetch(`${local}/api/v1${path}`, {
       method, headers: { Authorization: authorization, 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(30_000),
     });
@@ -175,7 +195,7 @@ async function start() {
     oauth = await api('PATCH', `/user/applications/oauth2/${oauth.id}`, { ...registration, redirect_uris: [...new Set([...oauth.redirect_uris, callback])] });
   }
   for (const [name, isPrivate] of [['web-ide-demo', false], ['private-demo', true]]) {
-    const exists = await fetch(`http://127.0.0.1:${giteaPort}/api/v1/repos/${credentials.username}/${name}`, { headers: { Authorization: authorization } });
+    const exists = await fetch(`${local}/api/v1/repos/${credentials.username}/${name}`, { headers: { Authorization: authorization } });
     if (exists.status === 404) {
       await api('POST', '/user/repos', { name, private: isPrivate, auto_init: true, default_branch: 'main', description: 'Browser Web IDE demonstration' });
       await api('POST', `/repos/${credentials.username}/${name}/contents`, { branch: 'main', message: 'Add Web IDE examples', files: [
